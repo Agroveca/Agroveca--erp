@@ -36,7 +36,7 @@ interface ShopifyOrder {
 }
 
 export default function ShopifyIntegrationModule() {
-  const { isAdmin } = useAuth();
+  const { user } = useAuth();
   const [config, setConfig] = useState<ShopifyConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
@@ -170,22 +170,33 @@ export default function ShopifyIntegrationModule() {
 
       for (const product of products) {
         try {
-          const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/shopify-sync-stock`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                product_id: product.id,
-                quantity: product.stock_quantity,
-              }),
-            }
-          );
+          // const response = await fetch(
+          //   `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/shopify-sync-stock`,
+          //   {
+          //     method: 'POST',
+          //     headers: {
+          //       'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          //       'Content-Type': 'application/json',
+          //     },
+          //     body: JSON.stringify({
+          //       product_id: product.id,
+          //       quantity: product.stock_quantity,
+          //     }),
+          //   }
+          // );
 
-          if (response.ok) {
+          const response = await supabase.functions.invoke('shopify-sync-stock', {
+            body: {
+              product_id: product.id,
+              quantity: product.stock_quantity,
+            },
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY}`,
+              'Content-Type': 'application/json',
+            }
+          });
+
+          if (response.data && response.data.success) {
             successCount++;
           } else {
             errorCount++;
@@ -212,7 +223,7 @@ export default function ShopifyIntegrationModule() {
     }).format(amount);
   };
 
-  if (!isAdmin) {
+  if (!user?.role || user.role !== 'admin') {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -254,11 +265,10 @@ export default function ShopifyIntegrationModule() {
           {config && (
             <button
               onClick={toggleActive}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                config.is_active
-                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${config.is_active
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
             >
               {config.is_active ? 'Activo' : 'Inactivo'}
             </button>
