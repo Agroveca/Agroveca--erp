@@ -139,25 +139,21 @@ export default function CRMModule() {
     }
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-vip-email`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            customer_id: code.customer_id,
-            customer_name: code.customers.name,
-            customer_email: code.customers.email,
-            discount_code: code.discount_code,
-            discount_code_id: code.id,
-          }),
-        }
-      );
+      const response = await supabase.functions.invoke('send-vip-email', {
+        body: {
+          customer_id: code.customer_id,
+          customer_name: code.customers.name,
+          customer_email: code.customers.email,
+          discount_code: code.discount_code,
+          discount_code_id: code.id,
+        },
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
-      if (response.ok) {
+      if (response.data && response.data.success) {
         await supabase
           .from('vip_discount_codes')
           .update({
@@ -631,11 +627,10 @@ export default function CRMModule() {
                   {customerOrders.map((order, index) => (
                     <div
                       key={order.id}
-                      className={`rounded-lg p-4 border ${
-                        order.is_vip_milestone
-                          ? 'bg-gradient-to-r from-amber-900/40 to-amber-800/40 border-amber-500 shadow-lg shadow-amber-500/30'
-                          : 'bg-slate-800/60 border-slate-700'
-                      }`}
+                      className={`rounded-lg p-4 border ${order.is_vip_milestone
+                        ? 'bg-gradient-to-r from-amber-900/40 to-amber-800/40 border-amber-500 shadow-lg shadow-amber-500/30'
+                        : 'bg-slate-800/60 border-slate-700'
+                        }`}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div>
