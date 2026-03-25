@@ -11,8 +11,11 @@ interface AuthContextType {
   isAdmin: boolean;
   isOperator: boolean;
   isSeller: boolean;
+  isPasswordRecovery: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
+  requestPasswordReset: (email: string) => Promise<{ error: Error | null }>;
+  updatePassword: (password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -24,6 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -36,7 +40,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsPasswordRecovery(event === 'PASSWORD_RECOVERY');
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -85,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) return { error };
 
+      setIsPasswordRecovery(false);
       return { error: null };
     } catch (error) {
       return { error: error as Error };
@@ -110,6 +116,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await loadProfile(authData.user.id);
       }
 
+      setIsPasswordRecovery(false);
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
+
+  const requestPasswordReset = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+
+      if (error) return { error };
+
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
+
+  const updatePassword = async (password: string) => {
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+
+      if (error) return { error };
+
+      setIsPasswordRecovery(false);
       return { error: null };
     } catch (error) {
       return { error: error as Error };
@@ -117,6 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    setIsPasswordRecovery(false);
     await supabase.auth.signOut();
   };
 
@@ -131,8 +166,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAdmin: normalizedRole === UserProfileRole.Admin,
     isOperator: normalizedRole === UserProfileRole.Operario,
     isSeller: normalizedRole === UserProfileRole.Vendedor,
+    isPasswordRecovery,
     signIn,
     signUp,
+    requestPasswordReset,
+    updatePassword,
     signOut,
     refreshProfile,
   };
