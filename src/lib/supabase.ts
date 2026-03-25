@@ -96,6 +96,42 @@ export interface SalesOrder {
   products?: Product;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  total_purchases: number;
+  total_spent: number;
+  loyalty_tier: number;
+  reward_count: number;
+  last_purchase_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerOrderItem {
+  product_id?: string;
+  name?: string;
+  quantity?: number;
+  unit_price?: number;
+  sku?: string;
+}
+
+export interface CustomerOrder {
+  id: string;
+  customer_id: string;
+  order_number: string;
+  order_date: string;
+  total_amount: number;
+  items: CustomerOrderItem[];
+  status: string;
+  reward_eligible: boolean;
+  reward_included: boolean;
+  created_at: string;
+}
+
 export interface BusinessConfig {
   id: string;
   company_name: string;
