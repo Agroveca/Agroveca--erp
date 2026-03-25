@@ -13,10 +13,20 @@ export type CanonicalUserRole = 'admin' | 'operario' | 'vendedor';
 export type LegacyUserRole = 'operator' | 'ADMIN' | 'OPERARIO' | 'VENTAS';
 export type UserRoleValue = CanonicalUserRole | LegacyUserRole;
 
+export type RawMaterialCategory =
+  | 'chemical'
+  | 'natural'
+  | 'base'
+  | 'fragrance'
+  | 'colorant'
+  | 'substrate_component';
+
+export type ProductType = 'concentrado' | 'sustrato' | 'rtu-gatillo';
+
 export interface RawMaterial {
   id: string;
   name: string;
-  category: string;
+  category: RawMaterialCategory;
   unit: string;
   current_cost: number;
   stock_quantity: number;
@@ -38,7 +48,7 @@ export interface Product {
   name: string;
   product_id: string;
   format: string;
-  product_type: string;
+  product_type: ProductType;
   color: string | null;
   aroma: string | null;
   ph_target: number | null;
