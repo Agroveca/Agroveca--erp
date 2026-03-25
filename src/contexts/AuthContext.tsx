@@ -174,12 +174,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) return { error };
 
+      setLoading(true);
       clearRecoveryHash();
-      setIsPasswordRecovery(false);
       await supabase.auth.signOut();
+      setIsPasswordRecovery(false);
 
       return { error: null };
     } catch (error) {
+      setLoading(false);
       return { error: error as Error };
     }
   };
