@@ -9,6 +9,10 @@ if (!supabaseUrl || !supabaseDefaultKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseDefaultKey);
 
+export type CanonicalUserRole = 'admin' | 'operario' | 'vendedor';
+export type LegacyUserRole = 'operator' | 'ADMIN' | 'OPERARIO' | 'VENTAS';
+export type UserRoleValue = CanonicalUserRole | LegacyUserRole;
+
 export interface RawMaterial {
   id: string;
   name: string;
@@ -99,12 +103,46 @@ export enum UserProfileRole {
   Operario = 'operario'
 }
 
+export function normalizeUserRole(role?: string | null): CanonicalUserRole | null {
+  if (!role) return null;
+
+  const normalizedRole = role.toLowerCase();
+
+  switch (normalizedRole) {
+    case UserProfileRole.Admin:
+      return UserProfileRole.Admin;
+    case UserProfileRole.Operario:
+    case 'operator':
+      return UserProfileRole.Operario;
+    case UserProfileRole.Vendedor:
+    case 'ventas':
+      return UserProfileRole.Vendedor;
+    default:
+      return null;
+  }
+}
+
+export function getUserRoleLabel(role?: string | null): string {
+  const normalizedRole = normalizeUserRole(role);
+
+  switch (normalizedRole) {
+    case UserProfileRole.Admin:
+      return 'Administrador';
+    case UserProfileRole.Operario:
+      return 'Operario';
+    case UserProfileRole.Vendedor:
+      return 'Vendedor';
+    default:
+      return 'Usuario';
+  }
+}
+
 export interface UserProfile {
   id: string;
   user_id: string;
   email: string;
   full_name: string | null;
-  role?: UserProfileRole | null;
+  role?: UserRoleValue | null;
   phone: string | null;
   is_active: boolean;
   created_at: string;
