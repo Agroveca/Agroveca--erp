@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, Package, Target, AlertTriangle, TrendingDown, Calculator, Receipt, Truck, CheckCircle, BarChart3, Download } from 'lucide-react';
 import { calculateDashboardProductMetrics, getMonthlyRevenueSummary } from '../lib/dashboardFinancialHelpers';
+import { getDashboardMarginSummary } from '../lib/dashboardModuleHelpers';
 import { supabase, Product, BusinessConfig, SalesOrder } from '../lib/supabase';
 import { calculateNetFromGross, formatVATPercentage } from '../lib/taxUtils';
 import { generateProductDataSheet } from '../lib/pdfGenerator';
@@ -130,9 +131,7 @@ export default function DashboardModule() {
 
   const { monthlyOrders, monthlyRevenue, monthlyRevenueBreakdown } = getMonthlyRevenueSummary(orders);
 
-  const averageMargin = products.length > 0
-    ? products.reduce((sum, p) => sum + p.netMarginNet, 0) / products.length
-    : 0;
+  const { averageMargin, topProducts, bottomProducts } = getDashboardMarginSummary(products);
 
   const totalVATDebit = monthlyRevenueBreakdown.vat;
 
@@ -416,12 +415,9 @@ export default function DashboardModule() {
               <p className="text-sm text-emerald-700">Por margen neto (sobre valores netos)</p>
             </div>
           </div>
-          <div className="space-y-3">
-            {products
-              .sort((a, b) => b.netMarginNet - a.netMarginNet)
-              .slice(0, 3)
-              .map((item) => (
-                <div key={item.product.id} className="glass-card rounded-lg p-4 shadow-sm">
+            <div className="space-y-3">
+             {topProducts.map((item) => (
+                 <div key={item.product.id} className="glass-card rounded-lg p-4 shadow-sm">
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="font-medium text-white">{item.product.name}</p>
@@ -450,12 +446,9 @@ export default function DashboardModule() {
               <p className="text-sm text-red-700">Requieren atención inmediata</p>
             </div>
           </div>
-          <div className="space-y-3">
-            {products
-              .sort((a, b) => a.netMarginNet - b.netMarginNet)
-              .slice(0, 3)
-              .map((item) => (
-                <div key={item.product.id} className="glass-card rounded-lg p-4 shadow-sm">
+            <div className="space-y-3">
+             {bottomProducts.map((item) => (
+                 <div key={item.product.id} className="glass-card rounded-lg p-4 shadow-sm">
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="font-medium text-white">{item.product.name}</p>
