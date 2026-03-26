@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Star, Package, CheckCircle, AlertCircle, Gift, Printer, Search, Filter } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { CustomerOrderItem, supabase } from '../lib/supabase';
 import VIPOrderLabel from './VIPOrderLabel';
 import ThankYouCard from './ThankYouCard';
 
@@ -10,7 +10,7 @@ interface Order {
   order_number: string;
   order_date: string;
   total_amount: number;
-  items: any;
+  items: CustomerOrderItem[];
   status: string;
   reward_eligible: boolean;
   reward_included: boolean;
@@ -18,11 +18,19 @@ interface Order {
   customer?: {
     name: string;
     email: string;
-    address: string;
+    address: string | null;
     total_purchases: number;
     order_count: number;
   };
 }
+
+const sanitizeOrderItems = (items: CustomerOrderItem[] | null | undefined) => {
+  return (items || []).map((item) => ({
+    name: item.name || 'Producto sin nombre',
+    quantity: item.quantity || 0,
+    sku: item.sku,
+  }));
+};
 
 export default function OrderPreparationModule() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -427,7 +435,7 @@ export default function OrderPreparationModule() {
           customerName={selectedOrder.customer?.name || ''}
           customerEmail={selectedOrder.customer?.email || ''}
           address={selectedOrder.customer?.address || ''}
-          items={selectedOrder.items || []}
+          items={sanitizeOrderItems(selectedOrder.items)}
           orderDate={selectedOrder.order_date}
         />
       )}
