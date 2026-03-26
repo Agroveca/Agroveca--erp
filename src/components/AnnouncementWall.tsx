@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Bell, AlertTriangle, Info, CheckCircle, Plus, X } from 'lucide-react';
+import { countUnreadAnnouncements } from '../lib/dashboardHelpers';
 import { supabase, SystemAnnouncement } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -19,13 +20,7 @@ export default function AnnouncementWall() {
     return error instanceof Error ? error.message : 'Error al crear aviso';
   };
 
-  useEffect(() => {
-    if (user) {
-      loadData();
-    }
-  }, [user]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [announcementsData, readsData] = await Promise.all([
         supabase
@@ -42,7 +37,13 @@ export default function AnnouncementWall() {
     } catch (error) {
       console.error('Error loading announcements:', error);
     }
-  };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (user) {
+      loadData();
+    }
+  }, [user, loadData]);
 
   const markAsRead = async (announcementId: string) => {
     if (reads.has(announcementId)) return;
@@ -116,7 +117,7 @@ export default function AnnouncementWall() {
     }
   };
 
-  const unreadCount = announcements.filter((a) => !reads.has(a.id)).length;
+  const unreadCount = countUnreadAnnouncements(announcements, reads);
 
   return (
     <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-700/50 p-6">
