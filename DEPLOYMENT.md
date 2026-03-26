@@ -2,7 +2,7 @@
 
 ## Sistema Multiusuario ERP para Cuida Tu Planta
 
-Esta aplicación es un sistema ERP completo con autenticación multiusuario, gestión de roles, escaneo QR móvil y diseño responsive mobile-first.
+Esta aplicacion es un ERP web con autenticacion multiusuario, gestion de roles, escaneo QR movil, integracion Shopify y validaciones tecnicas minimas ya incorporadas en el repositorio.
 
 ---
 
@@ -12,13 +12,19 @@ Esta aplicación es un sistema ERP completo con autenticación multiusuario, ges
 - Sistema de login/registro con Supabase Auth
 - Gestión de sesiones persistentes
 - Protección de rutas automática
-- Roles de usuario: Administrador y Operario
+- Roles de usuario: Administrador, Operario y Vendedor
+- Recuperacion de contrasena con limpieza del hash de recovery
+- Webhook de Shopify con validacion real de HMAC y dominio
 
 ### Gestión de Usuarios
 - Perfiles de usuario con roles
 - Panel de administración de usuarios (solo admins)
 - Activación/desactivación de cuentas
 - Cambio de roles
+
+### Validaciones y confiabilidad
+- `npm run typecheck` en verde como criterio minimo de estabilidad
+- `npm test` con Vitest para helpers fiscales, auth recovery, permisos y payloads Shopify
 
 ### Escaneo QR Móvil
 - Escaneo de códigos QR desde la cámara del móvil
@@ -66,10 +72,10 @@ En la sección "Environment Variables" de Vercel, agrega:
 
 ```
 VITE_SUPABASE_URL=<tu-url-de-supabase>
-VITE_SUPABASE_ANON_KEY=<tu-clave-anonima-de-supabase>
+VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=<tu-clave-publicable-de-supabase>
 ```
 
-**Importante**: Estas variables ya están configuradas en tu archivo `.env` local. Cópialas desde ahí.
+**Importante**: Estas variables deben coincidir con `.env.local` o `.env.production`, segun el ambiente.
 
 ### Paso 4: Desplegar
 
@@ -106,7 +112,7 @@ En "Site settings" > "Environment variables", agrega:
 
 ```
 VITE_SUPABASE_URL=<tu-url-de-supabase>
-VITE_SUPABASE_ANON_KEY=<tu-clave-anonima-de-supabase>
+VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=<tu-clave-publicable-de-supabase>
 ```
 
 ### Paso 4: Desplegar
@@ -128,7 +134,7 @@ VITE_SUPABASE_ANON_KEY=<tu-clave-anonima-de-supabase>
 1. Ve a tu proyecto de Supabase
 2. Authentication > Providers
 3. Asegúrate de que "Email" esté habilitado
-4. **Importante**: Desactiva "Confirm email" para permitir registro sin confirmación
+4. Configura las politicas de confirmacion segun el ambiente y el flujo operativo que quieran sostener
 
 ### Paso 2: Configurar URLs Permitidas
 
@@ -149,7 +155,7 @@ Después del despliegue:
 1. Abre tu aplicación desplegada
 2. Regístrate con tu email y contraseña
 3. Ve a Supabase > Table Editor > `user_profiles`
-4. Encuentra tu usuario y cambia el campo `role` de `operator` a `admin`
+4. Encuentra tu usuario y cambia el campo `role` de `operario` a `admin` si necesitas acceso total inicial
 5. Cierra sesión y vuelve a iniciar sesión para ver los módulos de administrador
 
 ---
@@ -199,6 +205,14 @@ Cada materia prima en la base de datos tiene un código QR único. Para imprimir
 
 ## Actualizar la Aplicación
 
+Antes de desplegar una rama o merge a `main`, verifica:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
 ### Despliegue Automático
 
 Tanto Vercel como Netlify configuran despliegue automático:
@@ -225,11 +239,11 @@ Si necesitas redesplegar manualmente:
 
 ### Error: "Missing Supabase environment variables"
 
-**Solución**: Verifica que las variables de entorno estén correctamente configuradas en tu plataforma de despliegue.
+**Solución**: Verifica que `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY` esten correctamente configuradas en tu plataforma de despliegue.
 
 ### No puedo registrarme
 
-**Solución**: Verifica que la autenticación por email esté habilitada en Supabase y que "Confirm email" esté desactivado.
+**Solución**: Verifica que la autenticacion por email este habilitada en Supabase y que las reglas del ambiente coincidan con el flujo operativo esperado.
 
 ### El escáner QR no funciona
 
@@ -251,6 +265,7 @@ Si necesitas redesplegar manualmente:
 - Autenticación con Supabase Auth (industry standard)
 - Row Level Security (RLS) en todas las tablas
 - Validación de roles del lado del servidor
+- Validacion criptografica del webhook de Shopify
 - Variables de entorno para credenciales sensibles
 - HTTPS obligatorio en producción
 
@@ -303,7 +318,8 @@ Puedes compartir esta URL con tu equipo para que accedan desde cualquier disposi
 4. Invita a tu equipo a registrarse
 5. Asigna roles según corresponda
 6. Genera e imprime códigos QR para tus materias primas
-7. Empieza a usar el sistema desde tu móvil
+7. Verifica `npm test`, `npm run typecheck` y `npm run build` antes de cada despliegue relevante
+8. Empieza a usar el sistema desde tu móvil
 
 ---
 

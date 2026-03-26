@@ -2,6 +2,23 @@
 
 [Edit in StackBlitz next generation editor ⚡️](https://stackblitz.com/~/github.com/Agroveca01/Agroveca--erp)
 
+## Estado actual del repo
+
+- Frontend ERP en React + Vite + TypeScript sobre Supabase.
+- Roles operativos vigentes: `admin`, `operario`, `vendedor`.
+- Integracion Shopify endurecida con validacion de webhook y sync de stock autenticado.
+- Flujo VIP documentado como simulacion explicita; no envia correos reales desde esta accion.
+- Red minima de validaciones automatizadas disponible con `vitest` para helpers fiscales, auth recovery, permisos por rol y payloads Shopify.
+
+## Verificacion recomendada
+
+```bash
+npm install
+npm test
+npm run typecheck
+npm run build
+```
+
 ## Configuración de Ambientes: Desarrollo & Producción
 
 Este proyecto soporta dos ambientes completamente separados: **Desarrollo** y **Producción**. 
@@ -41,6 +58,7 @@ VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=<PUBLISHABLE-KEY-PROD>
 - Si creas un nuevo entorno Supabase para desarrollo, debes migrar los schemas y reglas según los requerimientos de tu feature/pr.
 - El frontend nunca debe usar claves service_role, sólo las ANON/public.
 - Para dudas, consulta esta sección antes de hacer despliegues o cambios de ambiente.
+- El cliente del frontend usa `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY` desde `src/lib/supabase.ts`.
 
 ---
 

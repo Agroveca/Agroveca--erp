@@ -23,7 +23,7 @@ Permitir que Cuida Tu Planta opere su negocio diario desde un solo sistema, con 
 - No asumir contabilidad completa ni cierre contable formal dentro del ERP.
 - No asumir una automatizacion omnicanal totalmente madura.
 - No asumir que todas las integraciones externas estan listas para uso productivo sin ajustes.
-- No asumir que el modelo actual compila sin deuda tecnica o sin brechas de seguridad/consistencia.
+- No asumir que todas las automatizaciones ya cierran el ciclo real de negocio, aunque el baseline tecnico actual ya compila y verifica en verde.
 
 ## 5. Usuarios y roles
 
@@ -142,7 +142,7 @@ Capacidades observadas:
 - gestion de clientes;
 - programa de loyalty tiers;
 - codigos de descuento VIP;
-- preview de email VIP;
+- preview de email VIP y simulacion explicita de envio;
 - piezas imprimibles para experiencia VIP;
 - vinculacion conceptual con pedidos y recompensas.
 
@@ -203,7 +203,8 @@ Capacidades observadas:
 - registro de ordenes Shopify;
 - mapeo de clientes Shopify a clientes del ERP;
 - calculo de comisiones;
-- logs e indicadores de integracion.
+- logs e indicadores de integracion;
+- validacion real de HMAC para el webhook y auth/rol real en stock sync.
 
 Fuentes principales:
 
@@ -269,7 +270,8 @@ El sistema debe facilitar avisos, tareas y seguimiento de desempeno por rol.
 - persistencia centralizada en PostgreSQL/Supabase;
 - trazabilidad basica de eventos de negocio;
 - consistencia de tipos entre frontend y backend como requisito de estabilizacion;
-- validaciones de seguridad y firma para integraciones externas antes de endurecer uso productivo.
+- validaciones de seguridad y firma para integraciones externas ya aplicadas en Shopify y a sostener en futuras integraciones;
+- comando simple de verificacion continua con `npm test`, `npm run typecheck` y `npm run build`.
 
 ## 9. Flujos end-to-end clave
 
@@ -333,7 +335,8 @@ Entidades principales observadas:
 - estructura multirol en UI;
 - amplio set de modulos ERP visibles;
 - esquema Supabase con cobertura fuerte del dominio;
-- soporte de operaciones clave del negocio en interfaz.
+- soporte de operaciones clave del negocio en interfaz;
+- baseline automatizado de validaciones sobre helpers sensibles del dominio.
 
 ### Parcial o no consolidado
 
@@ -343,22 +346,19 @@ Entidades principales observadas:
 
 ### Ejemplos concretos de gaps
 
-- `src/components/InventoryModule.tsx` depende de `isOperator` no expuesto por `src/contexts/AuthContext.tsx`.
-- `src/lib/pdfGenerator.ts` usa `product_name` cuando el tipo de producto define `name`.
-- `src/components/FinancialHealthModule.tsx` referencia tipos/campos no presentes en `src/lib/supabase.ts`.
-- `supabase/functions/send-vip-email/index.ts` responde exito pero no integra un proveedor real de correo.
-- `supabase/functions/shopify-webhook/index.ts` lee HMAC pero no valida la firma.
+- `supabase/functions/send-vip-email/index.ts` responde en modo simulacion y no integra un proveedor real de correo.
+- `src/components/ProductionModule.tsx` y `src/components/ProductionSheetModule.tsx` siguen requiriendo vigilancia para no reabrir divergencias de modelo.
+- La cobertura automatizada todavia prioriza helpers puros; inventario y produccion necesitan crecimiento incremental si cambian los flujos.
 - Historicamente existio duplicidad de cliente Supabase frente a `src/lib/supabase.ts`; ese punto ya fue resuelto y debe mantenerse asi.
-- `src/components/PurchasesModule.tsx` no cubre alta de nuevos items de `packaging_inventory` cuando no existen.
 
 ## 12. Riesgos
 
 ### Riesgos tecnicos
 
 - desalineacion entre frontend, tipos TS y schema SQL;
-- deuda de compilacion confirmada por `npm run typecheck`;
 - duplicidad de fuentes de verdad en ciertos modelos;
-- integraciones externas sin endurecimiento suficiente.
+- crecimiento de funcionalidades sin actualizar la documentacion operativa;
+- integraciones externas nuevas que no repliquen el endurecimiento ya aplicado a Shopify.
 
 ### Riesgos operativos
 
@@ -368,9 +368,8 @@ Entidades principales observadas:
 
 ### Riesgos de seguridad
 
-- webhook Shopify sin validacion efectiva de firma;
-- uso discutible de headers/llaves en llamadas desde frontend a funciones edge;
-- posible exposicion accidental de comportamiento no endurecido en ambientes productivos.
+- uso accidental de variables de entorno equivocadas entre desarrollo y produccion;
+- posible exposicion accidental de comportamiento no endurecido en futuras integraciones productivas.
 
 ## 13. Supuestos
 
@@ -383,15 +382,14 @@ Entidades principales observadas:
 
 ### MVP estabilizado
 
-- corregir inconsistencias de tipos y nombres de roles;
-- unificar cliente y tipos Supabase;
+- sostener typecheck en verde y la red minima de validaciones ya incorporada;
+- sostener cliente y tipos Supabase como fuente unica;
 - cerrar flujos base de inventario, compras, produccion y ventas;
 - asegurar que dashboards usen entidades/campos reales;
 - documentar claramente limites funcionales actuales.
 
 ### Trimestre 1
 
-- endurecer integracion Shopify y seguridad de webhooks;
 - completar envio real de emails VIP y trazabilidad asociada;
 - consolidar cuentas por cobrar/pagar con mejor estado operativo;
 - reforzar trazabilidad entre orden, produccion y despacho.
@@ -406,7 +404,8 @@ Entidades principales observadas:
 ## 15. Criterios de exito del siguiente ciclo
 
 - el ERP compila sin errores de tipado criticos;
+- el baseline de validaciones automatizadas sigue pasando en CI/local;
 - los flujos de inventario, produccion, compras, ventas y fiscalidad reflejan entidades reales del schema;
 - la documentacion de producto coincide con el estado del codigo;
-- Shopify y VIP dejan de ser capacidades principalmente conceptuales y pasan a flujos confiables;
+- VIP deja de ser una simulacion y pasa a flujo confiable, mientras Shopify conserva su endurecimiento actual;
 - cada rol puede operar sus tareas principales sin ambiguedades de permisos o datos.
