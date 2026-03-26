@@ -1,15 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Users, Mail, Calendar, Plus, X, Phone, Lock, CircleUser as UserCircle, Shield, Send, Copy, CheckCircle } from 'lucide-react';
-import { supabase, getUserRoleLabel, UserProfile, UserProfileRole } from '../lib/supabase';
+import { supabase, UserProfile, UserProfileRole } from '../lib/supabase';
+import {
+  DEFAULT_NEW_USER_FORM,
+  getRoleInfo,
+  getUserStatusInfo,
+} from '../lib/userManagementHelpers';
 import { generateWelcomeMessage, copyMessageToClipboard, sendMessageViaWhatsApp } from '../lib/messageUtils';
-
-interface NewUserForm {
-  full_name: string;
-  email: string;
-  password: string;
-  phone: string;
-  role: UserProfileRole;
-}
 
 interface WelcomeCredentials {
   full_name: string;
@@ -27,13 +24,7 @@ export default function UserManagementModule() {
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [welcomeCredentials, setWelcomeCredentials] = useState<WelcomeCredentials | null>(null);
   const [copied, setCopied] = useState(false);
-  const [formData, setFormData] = useState<NewUserForm>({
-    full_name: '',
-    email: '',
-    password: '',
-    phone: '',
-    role: UserProfileRole.Operario
-  });
+  const [formData, setFormData] = useState(DEFAULT_NEW_USER_FORM);
 
   useEffect(() => {
     loadUsers();
@@ -106,13 +97,7 @@ export default function UserManagementModule() {
         });
         setShowWelcomeModal(true);
 
-        setFormData({
-          full_name: '',
-          email: '',
-          password: '',
-          phone: '',
-          role: UserProfileRole.Operario
-        });
+        setFormData(DEFAULT_NEW_USER_FORM);
         setShowForm(false);
 
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -140,19 +125,6 @@ export default function UserManagementModule() {
     if (!welcomeCredentials) return;
     const message = generateWelcomeMessage(welcomeCredentials);
     sendMessageViaWhatsApp(message);
-  };
-
-  const getRoleInfo = (role: string) => {
-    switch (role) {
-      case UserProfileRole.Admin:
-        return { label: 'Admin', desc: 'Acceso total', color: 'bg-purple-100 text-purple-800' };
-      case UserProfileRole.Vendedor:
-        return { label: 'Vendedor', desc: 'CRM/Simulador', color: 'bg-blue-100 text-blue-800' };
-      case UserProfileRole.Operario:
-        return { label: 'Operario', desc: 'Producción/Inventario', color: 'bg-[#10b981]/10 text-[#10b981]' };
-      default:
-        return { label: getUserRoleLabel(role), desc: 'Usuario', color: 'bg-gray-100 text-gray-800' };
-    }
   };
 
   if (loading) {
@@ -362,6 +334,7 @@ export default function UserManagementModule() {
             <tbody className="divide-y divide-[#30363d]">
               {users.map((user) => {
                 const roleInfo = getRoleInfo(user.role || 'usuario');
+                const statusInfo = getUserStatusInfo(user.is_active);
                 return (
                   <tr key={user.id} className="hover:bg-[#0d1117]/50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -395,12 +368,8 @@ export default function UserManagementModule() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                        user.is_active
-                          ? 'bg-[#10b981]/10 text-[#10b981]'
-                          : 'bg-gray-500/10 text-gray-400'
-                      }`}>
-                        {user.is_active ? 'Activo' : 'Inactivo'}
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusInfo.color}`}>
+                        {statusInfo.label}
                       </span>
                     </td>
                   </tr>
