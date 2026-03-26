@@ -1,20 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, DollarSign, Users, ShoppingCart, AlertCircle, Package, ShieldAlert } from 'lucide-react';
+import { calculateFactoryCost, getVolumeDiscount, VOLUME_DISCOUNTS } from '../lib/pricingHelpers';
 import { supabase, Product, FixedCostsConfig } from '../lib/supabase';
-
-interface FormatCosts {
-  container: number;
-  label: number;
-}
-
-interface VolumeDiscount {
-  level: number;
-  name: string;
-  minQuantity: number;
-  maxQuantity: number | null;
-  discountPercent: number;
-  description: string;
-}
 
 interface PricingAnalysis {
   product: Product;
@@ -37,57 +24,6 @@ interface PricingAnalysis {
   totalProfit: number;
 }
 
-const VOLUME_DISCOUNTS: VolumeDiscount[] = [
-  {
-    level: 1,
-    name: 'MOQ',
-    minQuantity: 100,
-    maxQuantity: 499,
-    discountPercent: 0,
-    description: 'Pedido mínimo (100-499 unidades)'
-  },
-  {
-    level: 2,
-    name: 'Master',
-    minQuantity: 500,
-    maxQuantity: 999,
-    discountPercent: 5,
-    description: 'Volumen Master (500-999 unidades) - 5% desc.'
-  },
-  {
-    level: 3,
-    name: 'Pallet',
-    minQuantity: 1000,
-    maxQuantity: null,
-    discountPercent: 10,
-    description: 'Volumen Pallet (1000+ unidades) - 10% desc.'
-  }
-];
-
-const getFormatCosts = (format: string): FormatCosts => {
-  const formatLower = format.toLowerCase();
-
-  if (formatLower.includes('100')) {
-    return { container: 350, label: 80 };
-  } else if (formatLower.includes('200')) {
-    return { container: 450, label: 100 };
-  } else if (formatLower.includes('500') || formatLower.includes('rtu')) {
-    return { container: 550, label: 150 };
-  }
-
-  return { container: 450, label: 100 };
-};
-
-const getVolumeDiscount = (quantity: number): VolumeDiscount => {
-  for (let i = VOLUME_DISCOUNTS.length - 1; i >= 0; i--) {
-    const discount = VOLUME_DISCOUNTS[i];
-    if (quantity >= discount.minQuantity &&
-        (discount.maxQuantity === null || quantity <= discount.maxQuantity)) {
-      return discount;
-    }
-  }
-  return VOLUME_DISCOUNTS[0];
-};
 
 export default function PricingSimulatorModule() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -98,39 +34,7 @@ export default function PricingSimulatorModule() {
   const [orderQuantity, setOrderQuantity] = useState(500);
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, [ourMarginTarget, distributorMarginTarget, orderQuantity]);
-
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [productsData, costsData] = await Promise.all([
-        supabase.from('products').select('*').order('name'),
-        supabase.from('fixed_costs_config').select('*').limit(1).maybeSingle(),
-      ]);
-
-      if (productsData.error) throw productsData.error;
-      if (costsData.error) throw costsData.error;
-
-      const prods = productsData.data || [];
-      const costs = costsData.data;
-
-      setProducts(prods);
-
-      if (prods.length > 0 && !selectedProduct) {
-        setSelectedProduct(prods[0].id);
-      }
-
-      await calculatePricingAnalysis(prods, costs);
-    } catch (error) {
-      console.error('Error loading pricing data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const calculatePricingAnalysis = async (
+  const calculatePricingAnalysis = useCallback(async (
     prods: Product[],
     costs: FixedCostsConfig | null
   ) => {
@@ -147,15 +51,11 @@ export default function PricingSimulatorModule() {
         return total + (cost * recipe.quantity_per_100l);
       }, 0);
 
-      const unitsPerBatch = product.units_per_batch || 1;
-      const rawMaterialCost = unitsPerBatch > 0 ? rawMaterialCostPer100L / unitsPerBatch : rawMaterialCostPer100L;
-
-      const formatCosts = getFormatCosts(product.format);
-      const containerCost = formatCosts.container;
-      const labelCost = formatCosts.label;
-      const packagingCost = costs?.packaging_cost || 500;
-
-      const factoryCost = rawMaterialCost + containerCost + packagingCost + labelCost;
+      const { rawMaterialCost, containerCost, labelCost, packagingCost, factoryCost } = calculateFactoryCost(
+        product,
+        costs,
+        rawMaterialCostPer100L,
+      );
 
       const baseDistributorPrice = factoryCost / (1 - ourMarginTarget / 100);
 
@@ -203,7 +103,39 @@ export default function PricingSimulatorModule() {
 
     const analysis = await Promise.all(analysisPromises);
     setPricingAnalysis(analysis);
-  };
+  }, [distributorMarginTarget, orderQuantity, ourMarginTarget]);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [productsData, costsData] = await Promise.all([
+        supabase.from('products').select('*').order('name'),
+        supabase.from('fixed_costs_config').select('*').limit(1).maybeSingle(),
+      ]);
+
+      if (productsData.error) throw productsData.error;
+      if (costsData.error) throw costsData.error;
+
+      const prods = productsData.data || [];
+      const costs = costsData.data;
+
+      setProducts(prods);
+
+      if (prods.length > 0 && !selectedProduct) {
+        setSelectedProduct(prods[0].id);
+      }
+
+      await calculatePricingAnalysis(prods, costs);
+    } catch (error) {
+      console.error('Error loading pricing data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [calculatePricingAnalysis, selectedProduct]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-CL', {
