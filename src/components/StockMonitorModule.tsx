@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, Bell, Package, ShoppingBag, Copy } from 'lucide-react';
 import { supabase, PackagingInventory } from '../lib/supabase';
+import {
+  buildPurchaseList,
+  calculateNeededStock,
+  getStockMonitorSummary,
+  getStockStatus,
+  getStockStatusDisplay,
+  getTotalReplenishmentCost,
+} from '../lib/stockMonitorHelpers';
 
 export default function StockMonitorModule() {
   const [inventory, setInventory] = useState<PackagingInventory[]>([]);
@@ -37,47 +45,12 @@ export default function StockMonitorModule() {
     }).format(amount);
   };
 
-  const criticalItems = inventory.filter((item) => item.current_stock < item.min_stock_alert);
-  const lowStockItems = inventory.filter(
-    (item) => item.current_stock >= item.min_stock_alert && item.current_stock < item.optimal_stock
-  );
-
-  const getStockStatus = (item: PackagingInventory) => {
-    if (item.current_stock < item.min_stock_alert) return 'critical';
-    if (item.current_stock < item.optimal_stock) return 'low';
-    return 'ok';
-  };
-
-  const getStatusColor = (status: string) => {
-    if (status === 'critical') return 'bg-red-100 text-red-800 border-red-300';
-    if (status === 'low') return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-    return 'bg-green-100 text-green-800 border-green-300';
-  };
-
-  const getStatusIcon = (status: string) => {
-    if (status === 'critical') return <AlertTriangle className="w-5 h-5 text-red-600" />;
-    if (status === 'low') return <Bell className="w-5 h-5 text-yellow-600" />;
-    return <Package className="w-5 h-5 text-green-600" />;
-  };
-
-  const calculateNeededStock = () => {
-    return inventory.map((item) => {
-      const deficit = Math.max(0, targetUnits - item.current_stock);
-      const totalCost = deficit * item.unit_cost_net * 1.19;
-      return { ...item, deficit, totalCost };
-    });
-  };
-
-  const neededStock = calculateNeededStock();
-  const totalReplenishmentCost = neededStock.reduce((sum, item) => sum + item.totalCost, 0);
-
-  const blockingItems = criticalItems.filter((item) => item.current_stock === 0);
+  const { criticalItems, lowStockItems, blockingItems } = getStockMonitorSummary(inventory);
+  const neededStock = calculateNeededStock(inventory, targetUnits);
+  const totalReplenishmentCost = getTotalReplenishmentCost(neededStock);
 
   const generatePurchaseList = () => {
-    const list = neededStock
-      .filter((item) => item.deficit > 0)
-      .map((item) => `${item.item_name} ${item.format || ''}: ${item.deficit} unidades`)
-      .join('\n');
+    const list = buildPurchaseList(neededStock);
 
     navigator.clipboard.writeText(list);
     alert('Lista de compras copiada al portapapeles');
@@ -181,6 +154,7 @@ export default function StockMonitorModule() {
             <tbody className="bg-white divide-y divide-slate-200">
               {neededStock.map((item) => {
                 const status = getStockStatus(item);
+                const statusDisplay = getStockStatusDisplay(status);
                 return (
                   <tr key={item.id} className={status === 'critical' ? 'bg-red-50' : 'hover:bg-slate-50'}>
                     <td className="px-4 py-3">
@@ -204,8 +178,14 @@ export default function StockMonitorModule() {
                       {item.deficit > 0 ? formatCurrency(item.totalCost) : '-'}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <div className={`inline-flex items-center space-x-1 px-3 py-1 rounded-full border ${getStatusColor(status)}`}>
-                        {getStatusIcon(status)}
+                      <div className={`inline-flex items-center space-x-1 px-3 py-1 rounded-full border ${statusDisplay.colorClass}`}>
+                        {statusDisplay.iconName === 'alert' ? (
+                          <AlertTriangle className="w-5 h-5 text-red-600" />
+                        ) : statusDisplay.iconName === 'bell' ? (
+                          <Bell className="w-5 h-5 text-yellow-600" />
+                        ) : (
+                          <Package className="w-5 h-5 text-green-600" />
+                        )}
                         <span className="text-xs font-semibold uppercase">{status}</span>
                       </div>
                     </td>
@@ -258,6 +238,7 @@ export default function StockMonitorModule() {
               <tbody className="bg-white divide-y divide-slate-200">
                 {inventory.map((item) => {
                   const status = getStockStatus(item);
+                  const statusDisplay = getStockStatusDisplay(status);
                   return (
                     <tr key={item.id} className={status === 'critical' ? 'bg-red-50' : 'hover:bg-slate-50'}>
                       <td className="px-6 py-4">
@@ -267,15 +248,21 @@ export default function StockMonitorModule() {
                         <div className="text-xs text-slate-500">{item.item_type}</div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <span className={`text-2xl font-bold ${status === 'critical' ? 'text-red-600' : status === 'low' ? 'text-yellow-600' : 'text-green-600'}`}>
+                        <span className={`text-2xl font-bold ${statusDisplay.textClass}`}>
                           {item.current_stock}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-slate-600">{item.min_stock_alert}</td>
                       <td className="px-6 py-4 text-right text-sm text-slate-600">{item.optimal_stock}</td>
                       <td className="px-6 py-4 text-center">
-                        <div className={`inline-flex items-center space-x-1 px-3 py-1 rounded-full border ${getStatusColor(status)}`}>
-                          {getStatusIcon(status)}
+                        <div className={`inline-flex items-center space-x-1 px-3 py-1 rounded-full border ${statusDisplay.colorClass}`}>
+                          {statusDisplay.iconName === 'alert' ? (
+                            <AlertTriangle className="w-5 h-5 text-red-600" />
+                          ) : statusDisplay.iconName === 'bell' ? (
+                            <Bell className="w-5 h-5 text-yellow-600" />
+                          ) : (
+                            <Package className="w-5 h-5 text-green-600" />
+                          )}
                           <span className="text-xs font-semibold uppercase">{status}</span>
                         </div>
                       </td>
