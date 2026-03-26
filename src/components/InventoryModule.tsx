@@ -1,26 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, Plus, CreditCard as Edit, Trash2, Package2, Beaker, X, Search } from 'lucide-react';
 import { filterProducts, filterRawMaterials, isLowStockMaterial } from '../lib/inventoryHelpers';
+import {
+  DEFAULT_PRODUCT_FORM,
+  DEFAULT_RAW_MATERIAL_FORM,
+  getInventorySummary,
+  mapProductToForm,
+  mapRawMaterialToForm,
+} from '../lib/inventoryModuleHelpers';
 import { Product, ProductType, RawMaterial, RawMaterialCategory, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/useAuth';
-
-const DEFAULT_RAW_MATERIAL_FORM = {
-  name: '',
-  category: 'chemical' as RawMaterialCategory,
-  unit: 'kg',
-  stock_quantity: 0,
-  min_stock_alert: 0,
-  current_cost: 0,
-};
-
-const DEFAULT_PRODUCT_FORM = {
-  product_id: '',
-  name: '',
-  product_type: 'concentrado' as ProductType,
-  format: '',
-  color: '#94a3b8',
-  base_price: 0,
-};
 
 export default function InventoryModule() {
   const { isOperator } = useAuth();
@@ -152,29 +141,17 @@ export default function InventoryModule() {
 
   const openEditRawMaterial = (material: RawMaterial) => {
     setEditingItem(material);
-    setRawMaterialForm({
-      name: material.name,
-      category: material.category,
-      unit: material.unit,
-      stock_quantity: material.stock_quantity,
-      min_stock_alert: material.min_stock_alert,
-      current_cost: material.current_cost,
-    });
+    setRawMaterialForm(mapRawMaterialToForm(material));
     setShowEditModal(true);
   };
 
   const openEditProduct = (product: Product) => {
     setEditingItem(product);
-    setProductForm({
-      product_id: product.product_id,
-      name: product.name,
-      product_type: product.product_type,
-      format: product.format || '',
-      color: product.color || '#94a3b8',
-      base_price: product.base_price,
-    });
+    setProductForm(mapProductToForm(product));
     setShowEditModal(true);
   };
+
+  const { totalRawMaterialValue, inventoryItemCount, lowStockCount } = getInventorySummary(rawMaterials, products, view);
 
   const updateRawMaterial = async () => {
     if (!editingItem) return;
@@ -532,19 +509,19 @@ export default function InventoryModule() {
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
             <h3 className="text-sm font-medium text-slate-500 mb-2">Valor Total Materias Primas</h3>
             <p className="text-2xl font-bold text-slate-900">
-              {formatCurrency(rawMaterials.reduce((acc, m) => acc + (m.current_cost * m.stock_quantity), 0))}
+              {formatCurrency(totalRawMaterialValue)}
             </p>
           </div>
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
           <h3 className="text-sm font-medium text-slate-500 mb-2">Items en Inventario</h3>
           <p className="text-2xl font-bold text-slate-900">
-            {view === 'raw' ? rawMaterials.length : products.length}
+            {inventoryItemCount}
           </p>
         </div>
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
           <h3 className="text-sm font-medium text-slate-500 mb-2">Alertas de Stock Bajo</h3>
           <p className="text-2xl font-bold text-red-600">
-            {rawMaterials.filter(isLowStockMaterial).length}
+            {lowStockCount}
           </p>
         </div>
         </div>
