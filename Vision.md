@@ -69,21 +69,20 @@ Necesita cotizar, vender, dar seguimiento a clientes, operar CRM/VIP, preparar p
 - menu por rol para `admin`, `operario` y `vendedor`;
 - modulos de inventario, produccion, ventas, CRM, Shopify, compras, proveedores, cuentas por pagar y fiscalidad;
 - herramientas operativas complementarias como QR, avisos, tareas y KPIs;
-- base Supabase con tablas, triggers, RLS y edge functions que soportan gran parte del dominio.
+- base Supabase con tablas, triggers, RLS y edge functions que soportan gran parte del dominio;
+- baseline de validaciones automatizadas sobre helpers fiscales, recovery auth, permisos y payloads Shopify.
 
 ### Capacidades parcialmente implementadas o con deuda
 
-- email VIP modelado, pero con envio mock;
-- integracion Shopify funcional a nivel conceptual, pero con validaciones de seguridad incompletas;
-- dashboards financieros con referencias a tipos/campos desalineados;
+- email VIP modelado como simulacion explicita, pero sin proveedor real de correo;
+- crecimiento de cobertura automatizada aun parcial en inventario y produccion;
 - coexistencia de mas de un modelo para produccion/lotes;
-- actualizaciones de inventario de compras no siempre cubren alta de nuevos items.
+- documentacion operativa que debe seguir alineandose cuando cambian los flujos.
 
 ### Riesgos del estado actual
 
-- deuda tecnica de tipado que reduce confiabilidad del estado real;
-- inconsistencias de nombres de roles entre UI, frontend y base;
 - necesidad de sostener una unica fuente de verdad para el cliente y los tipos compartidos de Supabase;
+- riesgo de que la documentacion vuelva a quedar atras del estado ejecutado del backlog;
 - diferencia entre lo que la UI promete y lo que ciertas funciones realmente ejecutan.
 
 ## 9. North Star y metricas estrategicas
