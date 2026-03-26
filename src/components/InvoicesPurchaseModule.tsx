@@ -2,28 +2,16 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2, Save } from 'lucide-react';
 import { supabase, Supplier, PackagingInventory, PurchaseInvoice } from '../lib/supabase';
 import { findPackagingInventoryMatch, normalizeInventoryFormat } from '../lib/purchasesHelpers';
-
-interface InvoiceLineItem {
-  item_type: string;
-  item_name: string;
-  format: string;
-  quantity: number;
-  unit_price_net: number;
-  line_total_net: number;
-  packaging_inventory_id: string | null;
-}
-
-type InvoiceLineItemValue = InvoiceLineItem[keyof InvoiceLineItem];
-
-const EMPTY_LINE_ITEM: InvoiceLineItem = {
-  item_type: 'envase',
-  item_name: '',
-  format: '',
-  quantity: 0,
-  unit_price_net: 0,
-  line_total_net: 0,
-  packaging_inventory_id: null,
-};
+import {
+  calculateInvoiceTotals,
+  EMPTY_LINE_ITEM,
+  getCreditDueDate,
+  hasInvoiceItemsToSubmit,
+  InvoiceLineItem,
+  InvoiceLineItemValue,
+  normalizeInvoiceItemsForInsert,
+  updateInvoiceLineItem,
+} from '../lib/purchaseInvoiceHelpers';
 
 export default function InvoicesPurchaseModule() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -76,37 +64,13 @@ export default function InvoicesPurchaseModule() {
   };
 
   const updateLineItem = (index: number, field: keyof InvoiceLineItem, value: InvoiceLineItemValue) => {
-    const newLineItems = [...lineItems];
-    newLineItems[index] = { ...newLineItems[index], [field]: value };
-
-    if (field === 'quantity' || field === 'unit_price_net') {
-      newLineItems[index].line_total_net = newLineItems[index].quantity * newLineItems[index].unit_price_net;
-    }
-
-    if (field === 'item_type' || field === 'item_name' || field === 'format') {
-      const matchingInventory = findPackagingInventoryMatch(
-        inventory,
-        newLineItems[index].item_type,
-        newLineItems[index].item_name,
-        newLineItems[index].format,
-      );
-      newLineItems[index].packaging_inventory_id = matchingInventory?.id || null;
-    }
-
-    setLineItems(newLineItems);
-  };
-
-  const calculateTotals = () => {
-    const subtotal = lineItems.reduce((sum, item) => sum + item.line_total_net, 0);
-    const vatAmount = subtotal * 0.19;
-    const totalAmount = subtotal + vatAmount;
-    return { subtotal, vatAmount, totalAmount };
+    setLineItems(updateInvoiceLineItem(lineItems, index, field, value, inventory));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (lineItems.length === 0 || lineItems.every((item) => item.quantity === 0)) {
+    if (!hasInvoiceItemsToSubmit(lineItems)) {
       alert('Debes agregar al menos un ítem a la factura');
       return;
     }
@@ -193,31 +157,19 @@ export default function InvoicesPurchaseModule() {
         });
       }
 
-      const itemsToInsert = inventoryResolvedItems
-        .filter((item) => item.quantity > 0)
-        .map((item) => ({
-          invoice_id: invoice.id,
-          item_type: item.item_type,
-          item_name: item.item_name,
-          format: normalizeInventoryFormat(item.format),
-          quantity: item.quantity,
-          unit_price_net: item.unit_price_net,
-          line_total_net: item.line_total_net,
-          packaging_inventory_id: item.packaging_inventory_id,
-        }));
+      const itemsToInsert = normalizeInvoiceItemsForInsert(invoice.id, inventoryResolvedItems);
 
       await supabase.from('purchase_invoice_items').insert(itemsToInsert);
 
       if (paymentCondition === 'credit') {
+        const totals = calculateInvoiceTotals(lineItems);
         await supabase.from('accounts_payable').insert([
           {
             invoice_id: invoice.id,
             supplier_id: supplierId,
-            amount_due: calculateTotals().totalAmount,
+            amount_due: totals.totalAmount,
             amount_paid: 0,
-            due_date: new Date(new Date(invoiceDate).getTime() + creditDays * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .split('T')[0],
+            due_date: getCreditDueDate(invoiceDate, creditDays),
             status: 'pending',
           },
         ]);
@@ -251,7 +203,7 @@ export default function InvoicesPurchaseModule() {
     }).format(amount);
   };
 
-  const totals = calculateTotals();
+  const totals = calculateInvoiceTotals(lineItems);
 
   return (
     <div className="space-y-6">
