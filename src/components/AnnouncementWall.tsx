@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Bell, AlertTriangle, Info, CheckCircle, Plus, X } from 'lucide-react';
+import {
+  buildAnnouncementReadSet,
+  DEFAULT_ANNOUNCEMENT_FORM,
+  getAnnouncementUrgencyDisplay,
+  isAnnouncementUnread,
+  markAnnouncementRead,
+} from '../lib/announcementHelpers';
 import { countUnreadAnnouncements } from '../lib/dashboardHelpers';
 import { supabase, SystemAnnouncement } from '../lib/supabase';
 import { useAuth } from '../contexts/useAuth';
@@ -9,12 +16,7 @@ export default function AnnouncementWall() {
   const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>([]);
   const [reads, setReads] = useState<Set<string>>(new Set());
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    message: '',
-    urgency: 'informative',
-    target_role: '',
-  });
+  const [formData, setFormData] = useState(DEFAULT_ANNOUNCEMENT_FORM);
 
   const getErrorMessage = (error: unknown) => {
     return error instanceof Error ? error.message : 'Error al crear aviso';
@@ -33,7 +35,7 @@ export default function AnnouncementWall() {
       ]);
 
       setAnnouncements(announcementsData.data || []);
-      setReads(new Set(readsData.data?.map((r: { announcement_id: string }) => r.announcement_id) || []));
+      setReads(buildAnnouncementReadSet(readsData.data || []));
     } catch (error) {
       console.error('Error loading announcements:', error);
     }
@@ -56,7 +58,7 @@ export default function AnnouncementWall() {
         },
       ]);
 
-      setReads(new Set(reads).add(announcementId));
+      setReads(markAnnouncementRead(reads, announcementId));
     } catch (error) {
       console.error('Error marking as read:', error);
     }
@@ -76,7 +78,7 @@ export default function AnnouncementWall() {
 
       alert('Aviso publicado exitosamente');
       setShowForm(false);
-      setFormData({ title: '', message: '', urgency: 'informative', target_role: '' });
+      setFormData(DEFAULT_ANNOUNCEMENT_FORM);
       loadData();
     } catch (error) {
       console.error('Error creating announcement:', error);
@@ -92,28 +94,6 @@ export default function AnnouncementWall() {
       loadData();
     } catch (error) {
       console.error('Error deleting announcement:', error);
-    }
-  };
-
-  const getUrgencyColor = (urgency: string) => {
-    switch (urgency) {
-      case 'urgent':
-        return 'bg-red-900/30 border-red-500';
-      case 'important':
-        return 'bg-yellow-900/30 border-yellow-500';
-      default:
-        return 'bg-blue-900/30 border-blue-500';
-    }
-  };
-
-  const getUrgencyIcon = (urgency: string) => {
-    switch (urgency) {
-      case 'urgent':
-        return <AlertTriangle className="w-6 h-6 text-red-400" />;
-      case 'important':
-        return <Bell className="w-6 h-6 text-yellow-400" />;
-      default:
-        return <Info className="w-6 h-6 text-blue-400" />;
     }
   };
 
@@ -229,16 +209,23 @@ export default function AnnouncementWall() {
         )}
 
         {announcements.map((announcement) => {
-          const isRead = reads.has(announcement.id);
+          const isRead = !isAnnouncementUnread(reads, announcement);
+          const urgencyDisplay = getAnnouncementUrgencyDisplay(announcement.urgency);
           return (
             <div
               key={announcement.id}
-              className={`rounded-lg p-4 border-2 transition-all ${getUrgencyColor(announcement.urgency)} ${!isRead ? 'ring-2 ring-cyan-500/50' : ''
+              className={`rounded-lg p-4 border-2 transition-all ${urgencyDisplay.containerClass} ${!isRead ? 'ring-2 ring-cyan-500/50' : ''
                 }`}
             >
               <div className="flex items-start justify-between mb-2">
                 <div className="flex items-start space-x-3 flex-1">
-                  {getUrgencyIcon(announcement.urgency)}
+                  {urgencyDisplay.iconName === 'alert' ? (
+                    <AlertTriangle className="w-6 h-6 text-red-400" />
+                  ) : urgencyDisplay.iconName === 'bell' ? (
+                    <Bell className="w-6 h-6 text-yellow-400" />
+                  ) : (
+                    <Info className="w-6 h-6 text-blue-400" />
+                  )}
                   <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
                       <h4 className="font-bold text-white">{announcement.title}</h4>
