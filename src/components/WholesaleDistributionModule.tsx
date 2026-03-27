@@ -3,32 +3,19 @@ import { Package, TrendingUp, DollarSign, Target, Truck, Calculator, AlertTriang
 import {
   calculateWholesaleQuotation,
   getProductMOQ,
-  getWholesaleFormatCosts,
   validateMOQ,
   WholesaleQuotationResult,
 } from '../lib/wholesaleHelpers';
+import {
+  calculateWholesaleDistributionProductCost,
+  WholesaleDistributionProductCost,
+} from '../lib/wholesaleDistributionModuleHelpers';
 import { supabase, Product, FormatCost, FixedCostsConfig } from '../lib/supabase';
-import { calculateNetFromGross, IVA_RATE, formatVATPercentage } from '../lib/taxUtils';
-
-interface ProductCostBreakdown {
-  product: Product;
-  rawMaterialCost: number;
-  containerCost: number;
-  packagingCost: number;
-  labelCost: number;
-  totalCost: number;
-  pvpGross: number;
-  pvpNet: number;
-  pvpVAT: number;
-  distributorPriceGross: number;
-  distributorPriceNet: number;
-  distributorVAT: number;
-  ctpProfitNet: number;
-}
+import { IVA_RATE, formatVATPercentage } from '../lib/taxUtils';
 
 export default function WholesaleDistributionModule() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [productCosts, setProductCosts] = useState<ProductCostBreakdown[]>([]);
+  const [productCosts, setProductCosts] = useState<WholesaleDistributionProductCost[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [quotationItems, setQuotationItems] = useState<{ [key: string]: number }>({});
@@ -90,39 +77,13 @@ export default function WholesaleDistributionModule() {
         return total + (cost * recipe.quantity_per_100l);
       }, 0);
 
-      const unitsPerBatch = product.units_per_batch || 1;
-      const rawMaterialCost = unitsPerBatch > 0 ? rawMaterialCostPer100L / unitsPerBatch : rawMaterialCostPer100L;
-
-      const formatCostData = getWholesaleFormatCosts(product, formats, costs);
-      const containerCost = formatCostData.container;
-      const labelCost = formatCostData.label;
-      const packagingCost = costs?.packaging_cost || 500;
-
-      const totalCost = rawMaterialCost + containerCost + packagingCost + labelCost;
-
-      const pvpGross = product.base_price;
-      const pvpBreakdown = calculateNetFromGross(pvpGross);
-
-      const distributorPriceGross = pvpGross * (1 - DISTRIBUTOR_DISCOUNT);
-      const distributorBreakdown = calculateNetFromGross(distributorPriceGross);
-
-      const ctpProfitNet = distributorBreakdown.net - totalCost;
-
-      return {
+      return calculateWholesaleDistributionProductCost(
         product,
-        rawMaterialCost,
-        containerCost,
-        packagingCost,
-        labelCost,
-        totalCost,
-        pvpGross,
-        pvpNet: pvpBreakdown.net,
-        pvpVAT: pvpBreakdown.vat,
-        distributorPriceGross,
-        distributorPriceNet: distributorBreakdown.net,
-        distributorVAT: distributorBreakdown.vat,
-        ctpProfitNet,
-      };
+        rawMaterialCostPer100L,
+        formats,
+        costs,
+        DISTRIBUTOR_DISCOUNT,
+      );
     });
 
     const costs_breakdown = await Promise.all(costsPromises);
