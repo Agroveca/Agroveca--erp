@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, TrendingDown, Package, DollarSign, CheckCircle } from 'lucide-react';
 import { supabase, Purchase, PackagingInventory } from '../lib/supabase';
 import {
-  findPackagingInventoryMatch,
+  buildPurchaseInventoryImpactPlan,
   getPurchaseMonthSummary,
   normalizeInventoryFormat,
 } from '../lib/purchasesHelpers';
@@ -78,35 +78,29 @@ export default function PurchasesModule() {
 
       if (error) throw error;
 
-      const existingItem = findPackagingInventoryMatch(
-        packagingInventory,
-        formData.item_type,
-        formData.item_name,
-        normalizedFormat,
-      );
+      const inventoryImpactPlan = buildPurchaseInventoryImpactPlan(packagingInventory, {
+        itemType: formData.item_type,
+        itemName: formData.item_name,
+        format: normalizedFormat,
+        quantity: formData.quantity,
+        unitCostNet,
+        supplierName: formData.supplier_name,
+      });
 
-      let packagingInventoryId = existingItem?.id || null;
+      let packagingInventoryId = inventoryImpactPlan.packagingInventoryId;
 
-      if (existingItem) {
+      if (inventoryImpactPlan.inventoryUpdatePayload) {
         await supabase
           .from('packaging_inventory')
           .update({
-            current_stock: existingItem.current_stock + formData.quantity,
-            unit_cost_net: unitCostNet,
+            current_stock: inventoryImpactPlan.inventoryUpdatePayload.current_stock,
+            unit_cost_net: inventoryImpactPlan.inventoryUpdatePayload.unit_cost_net,
           })
-          .eq('id', existingItem.id);
-      } else {
+          .eq('id', inventoryImpactPlan.inventoryUpdatePayload.id);
+      } else if (inventoryImpactPlan.inventoryInsertPayload) {
         const { data: newInventoryItem, error: inventoryInsertError } = await supabase
           .from('packaging_inventory')
-          .insert([
-            {
-              item_type: formData.item_type,
-              item_name: formData.item_name,
-              format: normalizedFormat,
-              current_stock: formData.quantity,
-              unit_cost_net: unitCostNet,
-            },
-          ])
+          .insert([inventoryImpactPlan.inventoryInsertPayload])
           .select()
           .single();
 
@@ -118,11 +112,11 @@ export default function PurchasesModule() {
         const { error: movementError } = await supabase.from('inventory_movements').insert([
           {
             packaging_inventory_id: packagingInventoryId,
-            movement_type: 'entrada',
-            quantity: formData.quantity,
+            movement_type: inventoryImpactPlan.movementPayload.movement_type,
+            quantity: inventoryImpactPlan.movementPayload.quantity,
             reference_id: purchase?.id,
-            reference_type: 'purchase',
-            notes: `Compra a ${formData.supplier_name}`,
+            reference_type: inventoryImpactPlan.movementPayload.reference_type,
+            notes: inventoryImpactPlan.movementPayload.notes,
           },
         ]);
 

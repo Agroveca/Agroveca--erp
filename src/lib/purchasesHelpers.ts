@@ -26,6 +26,30 @@ export interface PurchaseMonthSummary {
   totalSpent: number;
 }
 
+export interface PurchaseInventoryImpactPlan {
+  normalizedFormat: string | null;
+  packagingInventoryId: string | null;
+  shouldInsertInventory: boolean;
+  inventoryInsertPayload: {
+    item_type: string;
+    item_name: string;
+    format: string | null;
+    current_stock: number;
+    unit_cost_net: number;
+  } | null;
+  inventoryUpdatePayload: {
+    id: string;
+    current_stock: number;
+    unit_cost_net: number;
+  } | null;
+  movementPayload: {
+    movement_type: 'entrada';
+    quantity: number;
+    reference_type: 'purchase';
+    notes: string;
+  };
+}
+
 export const getPurchaseMonthSummary = (
   purchases: Purchase[],
   referenceDate = new Date(),
@@ -42,5 +66,53 @@ export const getPurchaseMonthSummary = (
     monthlyPurchases,
     totalVatCredit: monthlyPurchases.reduce((sum, purchase) => sum + purchase.vat_credit, 0),
     totalSpent: monthlyPurchases.reduce((sum, purchase) => sum + purchase.total_gross, 0),
+  };
+};
+
+export const buildPurchaseInventoryImpactPlan = (
+  inventory: PackagingInventory[],
+  input: {
+    itemType: string;
+    itemName: string;
+    format: string | null | undefined;
+    quantity: number;
+    unitCostNet: number;
+    supplierName: string;
+  },
+): PurchaseInventoryImpactPlan => {
+  const normalizedFormat = normalizeInventoryFormat(input.format);
+  const existingItem = findPackagingInventoryMatch(
+    inventory,
+    input.itemType,
+    input.itemName,
+    normalizedFormat,
+  );
+
+  return {
+    normalizedFormat,
+    packagingInventoryId: existingItem?.id || null,
+    shouldInsertInventory: !existingItem,
+    inventoryInsertPayload: existingItem
+      ? null
+      : {
+          item_type: input.itemType,
+          item_name: input.itemName,
+          format: normalizedFormat,
+          current_stock: input.quantity,
+          unit_cost_net: input.unitCostNet,
+        },
+    inventoryUpdatePayload: existingItem
+      ? {
+          id: existingItem.id,
+          current_stock: existingItem.current_stock + input.quantity,
+          unit_cost_net: input.unitCostNet,
+        }
+      : null,
+    movementPayload: {
+      movement_type: 'entrada',
+      quantity: input.quantity,
+      reference_type: 'purchase',
+      notes: `Compra a ${input.supplierName}`,
+    },
   };
 };
