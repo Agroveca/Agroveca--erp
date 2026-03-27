@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, Clock, DollarSign, Calendar as CalendarIcon } from 'lucide-react';
 import { supabase, AccountsPayable } from '../lib/supabase';
-import { getPayableStatus, getPayablesSummary } from '../lib/accountsPayableHelpers';
+import { buildPayablePaymentPlan, getPayableStatus, getPayablesSummary } from '../lib/accountsPayableHelpers';
 
 export default function AccountsPayableModule() {
   const [payables, setPayables] = useState<AccountsPayable[]>([]);
@@ -26,31 +26,24 @@ export default function AccountsPayableModule() {
   const markAsPaid = async (payableId: string) => {
     if (!confirm('¿Confirmar pago de esta factura?')) return;
 
+    const payable = payables.find((p) => p.id === payableId);
+    if (!payable) return;
+
     try {
+      const paymentDate = new Date().toISOString();
+      const paymentPlan = buildPayablePaymentPlan(payable, paymentDate);
+
       await supabase
         .from('accounts_payable')
-        .update({
-          status: 'paid',
-          amount_paid: payables.find((p) => p.id === payableId)?.amount_due || 0,
-        })
+        .update(paymentPlan.payableUpdate)
         .eq('id', payableId);
 
-      const payable = payables.find((p) => p.id === payableId);
-      if (payable) {
-        await supabase
-          .from('purchase_invoices')
-          .update({ status: 'paid', paid_date: new Date().toISOString() })
-          .eq('id', payable.invoice_id);
+      await supabase
+        .from('purchase_invoices')
+        .update(paymentPlan.invoiceUpdate)
+        .eq('id', payable.invoice_id);
 
-        await supabase.from('payment_records').insert([
-          {
-            payable_id: payableId,
-            amount: payable.amount_due,
-            payment_date: new Date().toISOString(),
-            payment_method: 'Transferencia',
-          },
-        ]);
-      }
+      await supabase.from('payment_records').insert([paymentPlan.paymentRecordInsert]);
 
       alert('Pago registrado exitosamente');
       loadPayables();

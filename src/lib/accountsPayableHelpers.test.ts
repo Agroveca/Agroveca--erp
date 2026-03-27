@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildPayablePaymentPlan,
   getDaysUntilDue,
   getPayableStatus,
   getPayablesSummary,
@@ -96,5 +97,40 @@ describe('accountsPayableHelpers', () => {
     expect(summary.dueSoonPayables).toHaveLength(1);
     expect(summary.currentPayables).toHaveLength(1);
     expect(summary.totalDebt).toBe(45000);
+  });
+
+  it('builds the payable payment plan for payable, invoice, and payment record updates', () => {
+    expect(
+      buildPayablePaymentPlan(
+        {
+          id: 'ap-10',
+          invoice_id: 'inv-10',
+          supplier_id: 'sup-10',
+          amount_due: 25000,
+          amount_paid: 0,
+          due_date: '2026-03-30',
+          status: 'pending',
+          aging_category: null,
+          created_at: '2026-03-01T00:00:00.000Z',
+          updated_at: '2026-03-01T00:00:00.000Z',
+        },
+        '2026-03-27T12:00:00.000Z',
+      ),
+    ).toEqual({
+      payableUpdate: {
+        status: 'paid',
+        amount_paid: 25000,
+      },
+      invoiceUpdate: {
+        status: 'paid',
+        paid_date: '2026-03-27T12:00:00.000Z',
+      },
+      paymentRecordInsert: {
+        payable_id: 'ap-10',
+        amount: 25000,
+        payment_date: '2026-03-27T12:00:00.000Z',
+        payment_method: 'Transferencia',
+      },
+    });
   });
 });
