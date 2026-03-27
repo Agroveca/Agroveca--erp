@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildPurchaseInventoryImpactPlan,
   findPackagingInventoryMatch,
   getPurchaseMonthSummary,
   normalizeInventoryFormat,
@@ -105,5 +106,79 @@ describe('purchasesHelpers', () => {
     expect(summary.monthlyPurchases).toHaveLength(2);
     expect(summary.totalSpent).toBe(23800);
     expect(summary.totalVatCredit).toBe(3800);
+  });
+
+  it('builds inventory impact plans for purchase inserts and stock updates', () => {
+    const inventory = [
+      {
+        id: 'inv-1',
+        item_type: 'envase',
+        item_name: 'Botella PET',
+        format: '500cc',
+        current_stock: 20,
+        min_stock_alert: 5,
+        optimal_stock: 40,
+        unit_cost_net: 120,
+        location: null,
+        last_updated: '2026-03-26T00:00:00.000Z',
+        created_at: '2026-03-26T00:00:00.000Z',
+      },
+    ];
+
+    expect(
+      buildPurchaseInventoryImpactPlan(inventory, {
+        itemType: 'envase',
+        itemName: 'Botella PET',
+        format: ' 500cc ',
+        quantity: 30,
+        unitCostNet: 100,
+        supplierName: 'Proveedor A',
+      }),
+    ).toEqual({
+      normalizedFormat: '500cc',
+      packagingInventoryId: 'inv-1',
+      shouldInsertInventory: false,
+      inventoryInsertPayload: null,
+      inventoryUpdatePayload: {
+        id: 'inv-1',
+        current_stock: 50,
+        unit_cost_net: 100,
+      },
+      movementPayload: {
+        movement_type: 'entrada',
+        quantity: 30,
+        reference_type: 'purchase',
+        notes: 'Compra a Proveedor A',
+      },
+    });
+
+    expect(
+      buildPurchaseInventoryImpactPlan(inventory, {
+        itemType: 'tapa',
+        itemName: 'Tapa Nueva',
+        format: null,
+        quantity: 80,
+        unitCostNet: 50,
+        supplierName: 'Proveedor B',
+      }),
+    ).toEqual({
+      normalizedFormat: null,
+      packagingInventoryId: null,
+      shouldInsertInventory: true,
+      inventoryInsertPayload: {
+        item_type: 'tapa',
+        item_name: 'Tapa Nueva',
+        format: null,
+        current_stock: 80,
+        unit_cost_net: 50,
+      },
+      inventoryUpdatePayload: null,
+      movementPayload: {
+        movement_type: 'entrada',
+        quantity: 80,
+        reference_type: 'purchase',
+        notes: 'Compra a Proveedor B',
+      },
+    });
   });
 });
