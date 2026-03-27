@@ -18,6 +18,23 @@ export interface PayablesSummary {
   currentPayables: AccountsPayable[];
 }
 
+export interface PayablePaymentPlan {
+  payableUpdate: {
+    status: 'paid';
+    amount_paid: number;
+  };
+  invoiceUpdate: {
+    status: 'paid';
+    paid_date: string;
+  };
+  paymentRecordInsert: {
+    payable_id: string;
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+  };
+}
+
 export const getDaysUntilDue = (dueDate: string, referenceDate = new Date()) => {
   const due = new Date(dueDate);
   const diffTime = due.getTime() - referenceDate.getTime();
@@ -80,5 +97,28 @@ export const getPayablesSummary = (
     overduePayables,
     dueSoonPayables,
     currentPayables,
+  };
+};
+
+export const buildPayablePaymentPlan = (
+  payable: AccountsPayable,
+  paymentDate = new Date().toISOString(),
+  paymentMethod = 'Transferencia',
+): PayablePaymentPlan => {
+  return {
+    payableUpdate: {
+      status: 'paid',
+      amount_paid: payable.amount_due,
+    },
+    invoiceUpdate: {
+      status: 'paid',
+      paid_date: paymentDate,
+    },
+    paymentRecordInsert: {
+      payable_id: payable.id,
+      amount: payable.amount_due,
+      payment_date: paymentDate,
+      payment_method: paymentMethod,
+    },
   };
 };

@@ -33,6 +33,17 @@ export interface ReceivablesAgingSummary {
   critical: ReceivableBucket;
 }
 
+export interface FinancialHealthTone {
+  cardClass: string;
+  textClass: string;
+  label: string;
+}
+
+export interface PaymentScoreBadge {
+  className: string;
+  label: string;
+}
+
 export const getLiquiditySummary = (
   payables: AccountsPayable[],
   receivables: AccountsReceivable[],
@@ -45,6 +56,70 @@ export const getLiquiditySummary = (
     totalReceivables,
     liquidityRatio: totalPayables > 0 ? totalReceivables / totalPayables : 0,
     netCashFlow: totalReceivables - totalPayables,
+  };
+};
+
+export const getLiquidityTone = (
+  totalPayables: number,
+  liquidityRatio: number,
+): FinancialHealthTone => {
+  if (totalPayables === 0) {
+    return {
+      cardClass: 'from-[#10b981]/80 to-[#10b981]/90 border-[#10b981]/50',
+      textClass: 'text-emerald-200',
+      label: 'Sin cuentas por pagar pendientes',
+    };
+  }
+
+  if (liquidityRatio >= 1) {
+    return {
+      cardClass: 'from-[#10b981]/80 to-[#10b981]/90 border-[#10b981]/50',
+      textClass: 'text-emerald-200',
+      label: 'Autofinanciado',
+    };
+  }
+
+  return {
+    cardClass: 'from-orange-800 to-orange-900 border-orange-700/50',
+    textClass: 'text-orange-200',
+    label: 'Deficit',
+  };
+};
+
+export const getNetCashFlowTone = (netCashFlow: number): FinancialHealthTone => {
+  if (netCashFlow >= 0) {
+    return {
+      cardClass: 'from-blue-800 to-blue-900 border-blue-700/50',
+      textClass: 'text-blue-200',
+      label: 'Superavit',
+    };
+  }
+
+  return {
+    cardClass: 'from-purple-800 to-purple-900 border-purple-700/50',
+    textClass: 'text-purple-200',
+    label: 'Deficit',
+  };
+};
+
+export const getPaymentScoreBadge = (score: string): PaymentScoreBadge => {
+  if (score === 'A') {
+    return {
+      className: 'bg-green-100 text-green-800',
+      label: 'Score: A',
+    };
+  }
+
+  if (score === 'B') {
+    return {
+      className: 'bg-yellow-100 text-yellow-800',
+      label: 'Score: B',
+    };
+  }
+
+  return {
+    className: 'bg-red-100 text-red-800',
+    label: `Score: ${score}`,
   };
 };
 

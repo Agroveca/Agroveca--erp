@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getLiquidityTone,
   getLiquiditySummary,
   getMonthlyCompletedOrders,
+  getNetCashFlowTone,
+  getPaymentScoreBadge,
   getReceivablesAgingSummary,
   getRevenueChannels,
   getTopCustomers,
@@ -72,6 +75,48 @@ describe('financialHealthHelpers', () => {
       current: { count: 1, totalAmount: 3000 },
       overdue1to15: { count: 1, totalAmount: 2000 },
       critical: { count: 1, totalAmount: 1000 },
+    });
+  });
+
+  it('builds display tones for liquidity, cash flow, and payment score badges', () => {
+    expect(getLiquidityTone(0, 0)).toEqual({
+      cardClass: 'from-[#10b981]/80 to-[#10b981]/90 border-[#10b981]/50',
+      textClass: 'text-emerald-200',
+      label: 'Sin cuentas por pagar pendientes',
+    });
+
+    expect(getLiquidityTone(1000, 1.5)).toEqual({
+      cardClass: 'from-[#10b981]/80 to-[#10b981]/90 border-[#10b981]/50',
+      textClass: 'text-emerald-200',
+      label: 'Autofinanciado',
+    });
+
+    expect(getLiquidityTone(1000, 0.5)).toEqual({
+      cardClass: 'from-orange-800 to-orange-900 border-orange-700/50',
+      textClass: 'text-orange-200',
+      label: 'Deficit',
+    });
+
+    expect(getNetCashFlowTone(500)).toEqual({
+      cardClass: 'from-blue-800 to-blue-900 border-blue-700/50',
+      textClass: 'text-blue-200',
+      label: 'Superavit',
+    });
+
+    expect(getNetCashFlowTone(-100)).toEqual({
+      cardClass: 'from-purple-800 to-purple-900 border-purple-700/50',
+      textClass: 'text-purple-200',
+      label: 'Deficit',
+    });
+
+    expect(getPaymentScoreBadge('A')).toEqual({
+      className: 'bg-green-100 text-green-800',
+      label: 'Score: A',
+    });
+
+    expect(getPaymentScoreBadge('C')).toEqual({
+      className: 'bg-red-100 text-red-800',
+      label: 'Score: C',
     });
   });
 });

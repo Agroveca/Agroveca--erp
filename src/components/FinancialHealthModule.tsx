@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, AlertCircle, DollarSign, BarChart3, PieChart } from 'lucide-react';
 import { supabase, AccountsPayable, AccountsReceivable, Customer, CustomerOrder, SalesOrder } from '../lib/supabase';
 import {
+  getLiquidityTone,
   getLiquiditySummary,
   getMonthlyCompletedOrders,
+  getNetCashFlowTone,
+  getPaymentScoreBadge,
   getReceivablesAgingSummary,
   getRevenueChannels,
   getTopCustomers,
@@ -53,6 +56,8 @@ export default function FinancialHealthModule() {
   const { totalRevenue, revenueChannels } = getRevenueChannels(monthlyOrders);
   const topCustomers = getTopCustomers(customers, customerOrders, receivables);
   const receivablesAging = getReceivablesAgingSummary(receivables);
+  const liquidityTone = getLiquidityTone(totalPayables, liquidityRatio);
+  const netCashFlowTone = getNetCashFlowTone(netCashFlow);
 
   return (
     <div className="space-y-6">
@@ -87,33 +92,25 @@ export default function FinancialHealthModule() {
           <p className="text-sm text-red-200 mt-1">{payables.length} facturas</p>
         </div>
 
-        <div className={`bg-gradient-to-br rounded-xl shadow-2xl border p-6 ${
-          liquidityRatio >= 1
-            ? 'from-[#10b981]/80 to-[#10b981]/90 border-[#10b981]/50'
-            : 'from-orange-800 to-orange-900 border-orange-700/50'
-        }`}>
+        <div className={`bg-gradient-to-br rounded-xl shadow-2xl border p-6 ${liquidityTone.cardClass}`}>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">Ratio Liquidez</h3>
             <BarChart3 className="w-6 h-6 text-white" />
           </div>
           <p className="text-3xl font-bold text-white">{liquidityRatio.toFixed(2)}</p>
-          <p className={`text-sm mt-1 ${liquidityRatio >= 1 ? 'text-emerald-200' : 'text-orange-200'}`}>
-            {totalPayables === 0 ? 'Sin cuentas por pagar pendientes' : liquidityRatio >= 1 ? 'Autofinanciado' : 'Déficit'}
+          <p className={`text-sm mt-1 ${liquidityTone.textClass}`}>
+            {liquidityTone.label}
           </p>
         </div>
 
-        <div className={`bg-gradient-to-br rounded-xl shadow-2xl border p-6 ${
-          netCashFlow >= 0
-            ? 'from-blue-800 to-blue-900 border-blue-700/50'
-            : 'from-purple-800 to-purple-900 border-purple-700/50'
-        }`}>
+        <div className={`bg-gradient-to-br rounded-xl shadow-2xl border p-6 ${netCashFlowTone.cardClass}`}>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">Flujo Neto</h3>
             <DollarSign className="w-6 h-6 text-white" />
           </div>
           <p className="text-3xl font-bold text-white">{formatCurrency(Math.abs(netCashFlow))}</p>
-          <p className={`text-sm mt-1 ${netCashFlow >= 0 ? 'text-blue-200' : 'text-purple-200'}`}>
-            {netCashFlow >= 0 ? 'Superávit' : 'Déficit'}
+          <p className={`text-sm mt-1 ${netCashFlowTone.textClass}`}>
+            {netCashFlowTone.label}
           </p>
         </div>
       </div>
@@ -199,17 +196,17 @@ export default function FinancialHealthModule() {
                     <div className="text-xs text-slate-400">{customer.totalUnits} unidades</div>
                   </div>
                 </div>
-                {customer.paymentScore && (
-                  <div className="mt-2">
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                      customer.paymentScore === 'A' ? 'bg-green-100 text-green-800' :
-                      customer.paymentScore === 'B' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-red-100 text-red-800'
-                    }`}>
-                      Score: {customer.paymentScore}
-                    </span>
-                  </div>
-                )}
+                {customer.paymentScore && (() => {
+                  const paymentScoreBadge = getPaymentScoreBadge(customer.paymentScore);
+
+                  return (
+                    <div className="mt-2">
+                      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${paymentScoreBadge.className}`}>
+                        {paymentScoreBadge.label}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
