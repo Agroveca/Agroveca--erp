@@ -42,6 +42,26 @@ interface ShopifyOrder {
 }
 
 export default function ShopifyIntegrationModule() {
+  // --- Panel Salud Shopify ---
+  const [shopifyDiscovery, setShopifyDiscovery] = useState<{ unmapped: any[] } | null>(null);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDiscoveryLoading(true);
+    setDiscoveryError(null);
+    fetch('/supabase/functions/shopify-discovery')
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Error al consultar descubrimiento Shopify');
+        const json = await res.json();
+        setShopifyDiscovery(json);
+      })
+      .catch((err) => {
+        setDiscoveryError(err?.message || 'Error desconocido');
+      })
+      .finally(() => setDiscoveryLoading(false));
+  }, []);
+
   const { isAdmin } = useAuth();
   const [config, setConfig] = useState<ShopifyConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -413,6 +433,63 @@ export default function ShopifyIntegrationModule() {
             Configura este webhook en tu panel de Shopify para el evento <strong>orders/create</strong>
           </p>
         </div>
+      </div>
+
+      {/* --- SALUD SHOPIFY: Productos/variantes no mapeados --- */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertCircle className="w-5 h-5 text-yellow-500" />
+          <h3 className="font-semibold text-yellow-900 text-lg">Salud Integración Shopify: Productos/variantes sin mapear</h3>
+        </div>
+        {discoveryLoading ? (
+          <div className="text-yellow-600 py-8">Cargando productos desde Shopify...</div>
+        ) : discoveryError ? (
+          <div className="text-red-600 py-8">Error: {discoveryError}</div>
+        ) : shopifyDiscovery && shopifyDiscovery.unmapped ? (
+          <>
+            <div className="mb-4 text-gray-700">
+              Encontrados <b>{shopifyDiscovery.unmapped.length}</b> productos/variantes de Shopify sin vincular.<br/>
+              {shopifyDiscovery.unmapped.length === 0 && (
+                <span className="text-green-600">¡Todo mapeado correctamente!</span>
+              )}
+            </div>
+            {shopifyDiscovery.unmapped.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full border">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Producto Shopify</th>
+                      <th className="px-3 py-2 text-left">Variante</th>
+                      <th className="px-3 py-2">SKU</th>
+                      <th className="px-3 py-2">Sugerencia del ERP</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {shopifyDiscovery.unmapped.map((item, idx) => (
+                      <tr key={item.variant.id + '-' + idx}>
+                        <td className="px-3 py-2">{item.shopifyProduct.title}</td>
+                        <td className="px-3 py-2">{item.variant.title ?? '-'}</td>
+                        <td className="px-3 py-2">{item.variant.sku}</td>
+                        <td className="px-3 py-2">
+                          {item.suggestedMatch ? (
+                            <span className="inline-block bg-blue-50 text-blue-800 text-xs font-medium px-2 py-1 rounded-lg">
+                              {item.suggestedMatch.name || item.suggestedMatch.product_id}
+                            </span>
+                          ) : (
+                            <span className="inline-block text-xs text-gray-400">Sin sugerencia</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="mt-3 text-xs text-gray-500">Para mapear un producto, ve al módulo de Productos y vincula el SKU/ID correspondiente.</div>
+          </>
+        ) : (
+          <div className="text-gray-500 py-8">No se pudo cargar el estado de salud de integración Shopify.</div>
+        )}
       </div>
 
       {showConfig && (
