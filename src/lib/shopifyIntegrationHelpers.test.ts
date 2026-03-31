@@ -4,6 +4,7 @@ import {
   DEFAULT_SHOPIFY_CONFIG_FORM,
   getShopifyOrdersSummary,
   mapShopifyConfigToForm,
+  SHOPIFY_API_VERSION_OPTIONS,
 } from './shopifyIntegrationHelpers';
 
 describe('shopifyIntegrationHelpers', () => {
@@ -11,11 +12,20 @@ describe('shopifyIntegrationHelpers', () => {
     expect(DEFAULT_SHOPIFY_CONFIG_FORM).toEqual({
       shop_domain: '',
       shopify_location_id: '',
-      api_version: '2024-01',
+      api_version: '2026-01',
       webhook_secret: '',
       commission_percentage: 2,
       payment_gateway_fee: 2.5,
     });
+  });
+
+  it('exposes only stable official Shopify API versions', () => {
+    expect(SHOPIFY_API_VERSION_OPTIONS).toEqual([
+      '2026-01',
+      '2025-10',
+      '2025-07',
+      '2025-04',
+    ]);
   });
 
   it('maps stored Shopify config into editable form state', () => {

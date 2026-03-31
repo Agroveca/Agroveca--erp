@@ -56,6 +56,17 @@ export interface Product {
   base_price: number;
   shopify_product_id?: string | null;
   shopify_variant_id?: string | null;
+  finished_inventory?: {
+    id: string;
+    quantity: number;
+    min_stock_alert: number | null;
+    updated_at?: string;
+  } | Array<{
+    id: string;
+    quantity: number;
+    min_stock_alert: number | null;
+    updated_at?: string;
+  }> | null;
   units_per_batch?: number | null;
 }
 

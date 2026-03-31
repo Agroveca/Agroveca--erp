@@ -27,10 +27,17 @@ export interface ShopifyOrderSummary {
   totalNet: number;
 }
 
+export const SHOPIFY_API_VERSION_OPTIONS = [
+  '2026-01',
+  '2025-10',
+  '2025-07',
+  '2025-04',
+] as const;
+
 export const DEFAULT_SHOPIFY_CONFIG_FORM: ShopifyConfigFormValues = {
   shop_domain: '',
   shopify_location_id: '',
-  api_version: '2024-01',
+  api_version: '2026-01',
   webhook_secret: '',
   commission_percentage: 2,
   payment_gateway_fee: 2.5,

@@ -142,7 +142,7 @@ export default function ProductionSheetModule() {
         ]);
       }
 
-      await supabase.from('production_batches').insert([
+      const { error: batchInsertError } = await supabase.from('production_batches').insert([
         {
           product_id: completionPlan.batchInsert.product_id,
           production_order_id: completionPlan.batchInsert.production_order_id,
@@ -161,6 +161,46 @@ export default function ProductionSheetModule() {
           notes: completionPlan.batchInsert.notes,
         },
       ]);
+
+      if (batchInsertError) throw batchInsertError;
+
+      const { data: currentFinishedInventory, error: finishedInventoryError } = await supabase
+        .from('finished_inventory')
+        .select('id, quantity')
+        .eq('product_id', completionPlan.batchInsert.product_id)
+        .maybeSingle();
+
+      if (finishedInventoryError) throw finishedInventoryError;
+
+      if (currentFinishedInventory) {
+        const { error: updateFinishedInventoryError } = await supabase
+          .from('finished_inventory')
+          .update({ quantity: currentFinishedInventory.quantity + completionPlan.batchInsert.units_produced })
+          .eq('id', currentFinishedInventory.id);
+
+        if (updateFinishedInventoryError) throw updateFinishedInventoryError;
+      } else {
+        const { error: insertFinishedInventoryError } = await supabase.from('finished_inventory').insert([
+          {
+            product_id: completionPlan.batchInsert.product_id,
+            quantity: completionPlan.batchInsert.units_produced,
+            min_stock_alert: 0,
+          },
+        ]);
+
+        if (insertFinishedInventoryError) throw insertFinishedInventoryError;
+      }
+
+      const { error: inventoryTransactionError } = await supabase.from('inventory_transactions').insert([
+        {
+          transaction_type: 'production_output',
+          product_id: completionPlan.batchInsert.product_id,
+          quantity: completionPlan.batchInsert.units_produced,
+          notes: `Orden ${orderId} completada y agregada a inventario terminado`,
+        },
+      ]);
+
+      if (inventoryTransactionError) throw inventoryTransactionError;
 
       alert(`Orden completada. ${completionPlan.summary.successfulUnits} unidades producidas exitosamente.`);
       loadData();

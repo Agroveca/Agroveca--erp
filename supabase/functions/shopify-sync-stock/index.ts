@@ -68,6 +68,12 @@ function normalizeLocationId(value: string): string {
   return value.includes('/') ? (value.split('/').pop() || '') : value;
 }
 
+function normalizeVariantGid(value: string): string {
+  return value.startsWith("gid://shopify/ProductVariant/")
+    ? value
+    : `gid://shopify/ProductVariant/${value}`;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -217,12 +223,12 @@ Deno.serve(async (req: Request) => {
     const shopifyUrl = `https://${shopDomain}/admin/api/${config.api_version}/inventory_levels/set.json`;
 
     const { data: inventoryData } = await supabase
-      .from("products")
-      .select("stock_quantity")
-      .eq("id", product_id)
+      .from("finished_inventory")
+      .select("quantity")
+      .eq("product_id", product_id)
       .maybeSingle();
 
-    const stockQuantity = quantity !== undefined ? quantity : (inventoryData?.stock_quantity || 0);
+    const stockQuantity = quantity !== undefined ? quantity : (inventoryData?.quantity || 0);
 
     const locationId = config.shopify_location_id
       ? normalizeLocationId(config.shopify_location_id)
@@ -251,25 +257,27 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const inventoryItemId = await getInventoryItemId(
+    const inventoryItemResult = await getInventoryItemId(
       shopDomain,
       config.api_version,
       shopifyAccessToken,
       product.shopify_variant_id
     );
 
-    if (!inventoryItemId) {
+    if (!inventoryItemResult.inventoryItemId) {
+      const inventoryItemError = inventoryItemResult.error || "Could not get inventory item ID";
+
       await supabase.from("stock_sync_log").insert({
         product_id: product_id,
         shopify_product_id: product.shopify_product_id,
         shopify_variant_id: product.shopify_variant_id,
         quantity_synced: stockQuantity,
         status: "failed",
-        error_message: "Could not get inventory item ID",
+        error_message: inventoryItemError,
       });
 
       return new Response(
-        JSON.stringify({ error: "Could not get inventory item ID" }),
+        JSON.stringify({ error: inventoryItemError }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -285,7 +293,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         location_id: locationId,
-        inventory_item_id: inventoryItemId,
+        inventory_item_id: inventoryItemResult.inventoryItemId,
         available: Math.floor(stockQuantity),
       }),
     });
@@ -374,25 +382,64 @@ async function getInventoryItemId(
   apiVersion: string,
   accessToken: string,
   variantId: string
-): Promise<string | null> {
+): Promise<{ inventoryItemId: string | null; error?: string }> {
   try {
-    const numericVariantId = variantId.split('/').pop();
+    const url = `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
+    const normalizedVariantId = normalizeVariantGid(variantId);
 
-    if (!numericVariantId) {
-      return null;
-    }
-
-    const url = `https://${shopDomain}/admin/api/${apiVersion}/variants/${numericVariantId}.json`;
     const response = await fetch(url, {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         "X-Shopify-Access-Token": accessToken,
       },
+      body: JSON.stringify({
+        query: `
+          query ProductVariantInventoryItem($id: ID!) {
+            productVariant(id: $id) {
+              inventoryItem {
+                legacyResourceId
+              }
+            }
+          }
+        `,
+        variables: { id: normalizedVariantId },
+      }),
     });
 
     const data = await response.json();
-    return data.variant?.inventory_item_id || null;
+
+    if (!response.ok) {
+      console.error("Shopify productVariant query failed:", data);
+      return {
+        inventoryItemId: null,
+        error: `Shopify productVariant query failed (${response.status}): ${JSON.stringify(data)}`,
+      };
+    }
+
+    if (data.errors?.length) {
+      console.error("Shopify GraphQL errors getting inventory item ID:", data.errors);
+      return {
+        inventoryItemId: null,
+        error: `Shopify GraphQL errors: ${JSON.stringify(data.errors)}`,
+      };
+    }
+
+    const legacyResourceId = data.data?.productVariant?.inventoryItem?.legacyResourceId;
+
+    if (!legacyResourceId) {
+      return {
+        inventoryItemId: null,
+        error: `Shopify variant ${normalizedVariantId} has no inventory item or was not found.`,
+      };
+    }
+
+    return { inventoryItemId: String(legacyResourceId) };
   } catch (error) {
     console.error("Error getting inventory item ID:", error);
-    return null;
+    return {
+      inventoryItemId: null,
+      error: error instanceof Error ? error.message : "Unknown inventory item lookup error",
+    };
   }
 }

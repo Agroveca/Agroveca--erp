@@ -128,7 +128,45 @@ export default function SalesModule() {
         .from('sales_orders')
         .insert(payloads.salesOrder);
 
-      if (salesError) console.error('Error creating sales order:', salesError);
+      if (salesError) throw salesError;
+
+      const { data: currentFinishedInventory, error: finishedInventoryError } = await supabase
+        .from('finished_inventory')
+        .select('id, quantity')
+        .eq('product_id', product.id)
+        .maybeSingle();
+
+      if (finishedInventoryError) throw finishedInventoryError;
+
+      const availableFinishedQuantity = currentFinishedInventory?.quantity || 0;
+
+      if (availableFinishedQuantity < orderForm.quantity) {
+        throw new Error(`Stock terminado insuficiente para ${product.name}. Disponible: ${availableFinishedQuantity}, solicitado: ${orderForm.quantity}.`);
+      }
+
+      const nextFinishedQuantity = availableFinishedQuantity - orderForm.quantity;
+
+      if (currentFinishedInventory) {
+        const { error: updateFinishedInventoryError } = await supabase
+          .from('finished_inventory')
+          .update({ quantity: nextFinishedQuantity })
+          .eq('id', currentFinishedInventory.id);
+
+        if (updateFinishedInventoryError) throw updateFinishedInventoryError;
+      } else {
+        throw new Error(`El producto ${product.name} no tiene registro en inventario terminado.`);
+      }
+
+      const { error: inventoryTransactionError } = await supabase
+        .from('inventory_transactions')
+        .insert({
+          transaction_type: 'sale',
+          product_id: product.id,
+          quantity: -orderForm.quantity,
+          notes: `Venta ${orderNumber} registrada por canal ${orderForm.channel}`,
+        });
+
+      if (inventoryTransactionError) throw inventoryTransactionError;
 
       setShowOrderModal(false);
       setOrderForm({ product_id: products[0]?.id || '', quantity: 1, channel: 'shopify', notes: '' });

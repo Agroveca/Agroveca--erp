@@ -303,6 +303,33 @@ export default function ProductionModule() {
 
       if (batchError) throw batchError;
 
+      const { data: currentFinishedInventory, error: finishedInventoryError } = await supabase
+        .from('finished_inventory')
+        .select('id, quantity')
+        .eq('product_id', selectedProduct.id)
+        .maybeSingle();
+
+      if (finishedInventoryError) throw finishedInventoryError;
+
+      if (currentFinishedInventory) {
+        const { error: updateFinishedInventoryError } = await supabase
+          .from('finished_inventory')
+          .update({ quantity: currentFinishedInventory.quantity + batchForm.units_produced })
+          .eq('id', currentFinishedInventory.id);
+
+        if (updateFinishedInventoryError) throw updateFinishedInventoryError;
+      } else {
+        const { error: insertFinishedInventoryError } = await supabase
+          .from('finished_inventory')
+          .insert({
+            product_id: selectedProduct.id,
+            quantity: batchForm.units_produced,
+            min_stock_alert: 0,
+          });
+
+        if (insertFinishedInventoryError) throw insertFinishedInventoryError;
+      }
+
       for (const consumption of consumptionPlan) {
         const { data: currentMaterial, error: fetchError } = await supabase
           .from('raw_materials')
@@ -330,6 +357,15 @@ export default function ProductionModule() {
             notes: consumption.notes,
           });
       }
+
+      await supabase
+        .from('inventory_transactions')
+        .insert({
+          transaction_type: 'production_output',
+          product_id: selectedProduct.id,
+          quantity: batchForm.units_produced,
+          notes: `Lote ${batchNumber} producido y agregado a inventario terminado`,
+        });
 
       setShowBatchModal(false);
       setBatchForm({ quantity_liters: 100, units_produced: 0, notes: '' });

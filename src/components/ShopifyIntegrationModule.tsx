@@ -5,6 +5,7 @@ import {
   DEFAULT_SHOPIFY_CONFIG_FORM,
   getShopifyOrdersSummary,
   mapShopifyConfigToForm,
+  SHOPIFY_API_VERSION_OPTIONS,
 } from '../lib/shopifyIntegrationHelpers';
 import { getShopifyStockSyncPayloads } from '../lib/shopifySync';
 import { useAuth } from '../contexts/useAuth';
@@ -298,7 +299,7 @@ export default function ShopifyIntegrationModule() {
     try {
       const { data: products } = await supabase
         .from('products')
-        .select('id, stock_quantity, shopify_product_id, shopify_variant_id')
+        .select('id, shopify_product_id, shopify_variant_id, finished_inventory(quantity)')
         .not('shopify_product_id', 'is', null);
 
       if (!products || products.length === 0) {
@@ -680,119 +681,147 @@ export default function ShopifyIntegrationModule() {
        </div>
 
       {showConfig && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Configuración de Shopify</h3>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Dominio de la Tienda
-                </label>
-                <input
-                  type="text"
-                  value={configForm.shop_domain}
-                  onChange={(e) => setConfigForm({ ...configForm, shop_domain: e.target.value })}
-                  placeholder="tu-tienda.myshopify.com"
-                  className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Shopify Location ID
-                </label>
-                <input
-                  type="text"
-                  value={configForm.shopify_location_id}
-                  onChange={(e) => setConfigForm({ ...configForm, shopify_location_id: e.target.value })}
-                  placeholder="gid://shopify/Location/... o ID numerico"
-                  className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Define la ubicacion exacta donde Shopify debe reflejar el stock del ERP.
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <h4 className="text-sm font-semibold text-slate-900">Locations disponibles en Shopify</h4>
-                  {locationsLoading && <span className="text-xs text-slate-500">Cargando...</span>}
-                </div>
-
-                {locationsError ? (
-                  <p className="text-sm text-red-600">No se pudieron cargar las locations: {locationsError}</p>
-                ) : locations.length === 0 ? (
-                  <p className="text-sm text-slate-600">Abre este modal con una sesion valida para consultar las locations activas.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {locations.map((location) => (
-                      <div key={location.id} className="rounded-md border border-slate-200 bg-white p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="font-medium text-slate-900">{location.name}</div>
-                            <div className="text-xs text-slate-500">Legacy ID: {location.legacy_id}</div>
-                            <div className="text-xs text-slate-500 break-all">{location.id}</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setConfigForm({ ...configForm, shopify_location_id: location.id })}
-                            className="rounded-md bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-200"
-                          >
-                            Usar esta
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                El token de Shopify ya no se configura aqui. La autenticacion se obtiene automaticamente desde los
-                secrets del servidor usando `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID` y `SHOPIFY_CLIENT_SECRET`.
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Versión de API
-                </label>
-                <input
-                  type="text"
-                  value={configForm.api_version}
-                  onChange={(e) => setConfigForm({ ...configForm, api_version: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Comisión Shopify (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={configForm.commission_percentage}
-                  onChange={(e) => setConfigForm({ ...configForm, commission_percentage: parseFloat(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Comisión Pasarela de Pago (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={configForm.payment_gateway_fee}
-                  onChange={(e) => setConfigForm({ ...configForm, payment_gateway_fee: parseFloat(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 py-6 sm:items-center">
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h3 className="text-xl font-bold text-gray-900">Configuración de Shopify</h3>
             </div>
 
-            <div className="flex gap-3 mt-6">
+            <div className="space-y-4 overflow-y-auto px-6 py-4">
+              <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-900">Conexión técnica</h4>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Ajustes necesarios para autenticar Shopify, definir la location y operar la sincronización técnica.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Dominio de la Tienda
+                  </label>
+                  <input
+                    type="text"
+                    value={configForm.shop_domain}
+                    onChange={(e) => setConfigForm({ ...configForm, shop_domain: e.target.value })}
+                    placeholder="tu-tienda.myshopify.com"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Shopify Location ID
+                  </label>
+                  <input
+                    type="text"
+                    value={configForm.shopify_location_id}
+                    onChange={(e) => setConfigForm({ ...configForm, shopify_location_id: e.target.value })}
+                    placeholder="gid://shopify/Location/... o ID numerico"
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Define la ubicacion exacta donde Shopify debe reflejar el stock del ERP.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h5 className="text-sm font-semibold text-slate-900">Locations disponibles en Shopify</h5>
+                    {locationsLoading && <span className="text-xs text-slate-500">Cargando...</span>}
+                  </div>
+
+                  {locationsError ? (
+                    <p className="text-sm text-red-600">No se pudieron cargar las locations: {locationsError}</p>
+                  ) : locations.length === 0 ? (
+                    <p className="text-sm text-slate-600">Abre este modal con una sesion valida para consultar las locations activas.</p>
+                  ) : (
+                    <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
+                      {locations.map((location) => (
+                        <div key={location.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-slate-900">{location.name}</div>
+                              <div className="text-xs text-slate-500">Legacy ID: {location.legacy_id}</div>
+                              <div className="text-xs text-slate-500 break-all">{location.id}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setConfigForm({ ...configForm, shopify_location_id: location.id })}
+                              className="rounded-md bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-200"
+                            >
+                              Usar esta
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                  El token de Shopify ya no se configura aqui. La autenticacion se obtiene automaticamente desde los
+                  secrets del servidor usando `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID` y `SHOPIFY_CLIENT_SECRET`.
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Versión de API Shopify
+                  </label>
+                  <select
+                    value={configForm.api_version}
+                    onChange={(e) => setConfigForm({ ...configForm, api_version: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  >
+                    {SHOPIFY_API_VERSION_OPTIONS.map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Solo se muestran versiones estables oficiales de Shopify para evitar configuraciones no soportadas.
+                  </p>
+                </div>
+              </section>
+
+              <section className="space-y-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-amber-900">Parámetros financieros</h4>
+                  <p className="mt-1 text-sm text-amber-800">
+                    Estos valores se usan para calcular comisiones, netos y rentabilidad de los pedidos Shopify dentro del ERP.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Comisión Shopify (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={configForm.commission_percentage}
+                    onChange={(e) => setConfigForm({ ...configForm, commission_percentage: parseFloat(e.target.value) })}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Comisión Pasarela de Pago (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={configForm.payment_gateway_fee}
+                    onChange={(e) => setConfigForm({ ...configForm, payment_gateway_fee: parseFloat(e.target.value) })}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                </div>
+              </section>
+            </div>
+
+            <div className="mt-auto flex gap-3 border-t border-gray-200 px-6 py-4">
               <button
                 onClick={() => setShowConfig(false)}
                 className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
