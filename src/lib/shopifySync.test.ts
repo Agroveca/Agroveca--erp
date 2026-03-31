@@ -7,33 +7,33 @@ import {
 } from './shopifySync';
 
 describe('shopify sync helpers', () => {
-  it('accepts only products with both Shopify ids and a numeric stock quantity', () => {
+  it('accepts products with both Shopify ids even when stock must be resolved server-side', () => {
     expect(isSyncableShopifyProduct({
       id: 'p1',
-      stock_quantity: 12,
+      finished_inventory: { quantity: 12 },
       shopify_product_id: 'sp1',
       shopify_variant_id: 'sv1',
     })).toBe(true);
 
     expect(isSyncableShopifyProduct({
       id: 'p1',
-      stock_quantity: 12,
+      finished_inventory: { quantity: 12 },
       shopify_product_id: 'sp1',
       shopify_variant_id: null,
     })).toBe(false);
 
     expect(isSyncableShopifyProduct({
       id: 'p1',
-      stock_quantity: Number.NaN,
+      finished_inventory: { quantity: Number.NaN },
       shopify_product_id: 'sp1',
       shopify_variant_id: 'sv1',
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it('builds the payload expected by the stock sync function', () => {
     expect(toShopifyStockSyncPayload({
       id: 'p1',
-      stock_quantity: 8,
+      finished_inventory: { quantity: 8 },
       shopify_product_id: 'sp1',
       shopify_variant_id: 'sv1',
     })).toEqual({
@@ -46,19 +46,19 @@ describe('shopify sync helpers', () => {
     expect(getShopifyStockSyncPayloads([
       {
         id: 'p1',
-        stock_quantity: 8,
+        finished_inventory: { quantity: 8 },
         shopify_product_id: 'sp1',
         shopify_variant_id: 'sv1',
       },
       {
         id: 'p2',
-        stock_quantity: 3,
+        finished_inventory: { quantity: 3 },
         shopify_product_id: 'sp2',
         shopify_variant_id: null,
       },
       {
         id: 'p3',
-        stock_quantity: undefined,
+        finished_inventory: { quantity: undefined },
         shopify_product_id: 'sp3',
         shopify_variant_id: 'sv3',
       },
@@ -66,6 +66,9 @@ describe('shopify sync helpers', () => {
       {
         product_id: 'p1',
         quantity: 8,
+      },
+      {
+        product_id: 'p3',
       },
     ]);
   });

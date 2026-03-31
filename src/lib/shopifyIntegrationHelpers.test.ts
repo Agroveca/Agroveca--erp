@@ -4,18 +4,28 @@ import {
   DEFAULT_SHOPIFY_CONFIG_FORM,
   getShopifyOrdersSummary,
   mapShopifyConfigToForm,
+  SHOPIFY_API_VERSION_OPTIONS,
 } from './shopifyIntegrationHelpers';
 
 describe('shopifyIntegrationHelpers', () => {
   it('provides stable default Shopify config form values', () => {
     expect(DEFAULT_SHOPIFY_CONFIG_FORM).toEqual({
       shop_domain: '',
-      access_token: '',
-      api_version: '2024-01',
+      shopify_location_id: '',
+      api_version: '2026-01',
       webhook_secret: '',
       commission_percentage: 2,
       payment_gateway_fee: 2.5,
     });
+  });
+
+  it('exposes only stable official Shopify API versions', () => {
+    expect(SHOPIFY_API_VERSION_OPTIONS).toEqual([
+      '2026-01',
+      '2025-10',
+      '2025-07',
+      '2025-04',
+    ]);
   });
 
   it('maps stored Shopify config into editable form state', () => {
@@ -23,7 +33,7 @@ describe('shopifyIntegrationHelpers', () => {
       mapShopifyConfigToForm({
         id: 'cfg-1',
         shop_domain: 'agroveca.myshopify.com',
-        access_token: 'secret',
+        shopify_location_id: 'gid://shopify/Location/123456789',
         api_version: '2024-04',
         webhook_secret: 'hook',
         commission_percentage: 3,
@@ -34,7 +44,7 @@ describe('shopifyIntegrationHelpers', () => {
       }),
     ).toEqual({
       shop_domain: 'agroveca.myshopify.com',
-      access_token: 'secret',
+      shopify_location_id: 'gid://shopify/Location/123456789',
       api_version: '2024-04',
       webhook_secret: 'hook',
       commission_percentage: 3,

@@ -1,5 +1,79 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+let shopifyAccessToken: string | undefined;
+let shopifyTokenExpiresAt = 0;
+
+function getRequiredEnv(name: string): string {
+  const value = Deno.env.get(name);
+
+  if (!value) {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+
+  return value;
+}
+
+async function getShopifyAccessToken(): Promise<string> {
+  const shop = getRequiredEnv("SHOPIFY_SHOP");
+  const clientId = getRequiredEnv("SHOPIFY_CLIENT_ID");
+  const clientSecret = getRequiredEnv("SHOPIFY_CLIENT_SECRET");
+
+  if (shopifyAccessToken && Date.now() < shopifyTokenExpiresAt - 60000) {
+    return shopifyAccessToken;
+  }
+
+  const tokenUrl = `https://${shop}.myshopify.com/admin/oauth/access_token`;
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "client_credentials",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to obtain Shopify token (${response.status})`);
+  }
+
+  const { access_token, expires_in } = await response.json();
+  shopifyAccessToken = access_token;
+  shopifyTokenExpiresAt = Date.now() + (Number(expires_in) || 86400) * 1000;
+  return access_token;
+}
+
+function normalizeShopDomain(value: string): string {
+  return value.replace(/^https?:\/\//i, "").replace(/\/$/, "").trim().toLowerCase();
+}
+
+function getConfiguredShopDomain(configShopDomain?: string | null): string {
+  const envShop = getRequiredEnv("SHOPIFY_SHOP");
+  const envShopDomain = `${envShop}.myshopify.com`.toLowerCase();
+
+  if (!configShopDomain) {
+    return envShopDomain;
+  }
+
+  const normalizedConfigDomain = normalizeShopDomain(configShopDomain);
+
+  if (normalizedConfigDomain !== envShopDomain) {
+    throw new Error(`Shopify shop mismatch between config (${normalizedConfigDomain}) and server secret (${envShopDomain})`);
+  }
+
+  return normalizedConfigDomain;
+}
+
+function normalizeLocationId(value: string): string {
+  return value.includes('/') ? (value.split('/').pop() || '') : value;
+}
+
+function normalizeVariantGid(value: string): string {
+  return value.startsWith("gid://shopify/ProductVariant/")
+    ? value
+    : `gid://shopify/ProductVariant/${value}`;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -103,16 +177,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    if (!config.access_token || !config.shop_domain) {
-      return new Response(
-        JSON.stringify({ error: "Missing Shopify credentials" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
     const { product_id, quantity }: SyncRequest = await req.json();
 
     if (!product_id) {
@@ -153,21 +217,26 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const shopifyUrl = `https://${config.shop_domain}/admin/api/${config.api_version}/inventory_levels/set.json`;
+    const shopDomain = getConfiguredShopDomain(config.shop_domain);
+
+    const shopifyAccessToken = await getShopifyAccessToken();
+    const shopifyUrl = `https://${shopDomain}/admin/api/${config.api_version}/inventory_levels/set.json`;
 
     const { data: inventoryData } = await supabase
-      .from("products")
-      .select("stock_quantity")
-      .eq("id", product_id)
+      .from("finished_inventory")
+      .select("quantity")
+      .eq("product_id", product_id)
       .maybeSingle();
 
-    const stockQuantity = quantity !== undefined ? quantity : (inventoryData?.stock_quantity || 0);
+    const stockQuantity = quantity !== undefined ? quantity : (inventoryData?.quantity || 0);
 
-    const locationId = await getShopifyLocationId(
-      config.shop_domain,
-      config.api_version,
-      config.access_token
-    );
+    const locationId = config.shopify_location_id
+      ? normalizeLocationId(config.shopify_location_id)
+      : await getShopifyLocationId(
+          shopDomain,
+          config.api_version,
+          shopifyAccessToken
+        );
 
     if (!locationId) {
       await supabase.from("stock_sync_log").insert({
@@ -188,25 +257,27 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const inventoryItemId = await getInventoryItemId(
-      config.shop_domain,
+    const inventoryItemResult = await getInventoryItemId(
+      shopDomain,
       config.api_version,
-      config.access_token,
+      shopifyAccessToken,
       product.shopify_variant_id
     );
 
-    if (!inventoryItemId) {
+    if (!inventoryItemResult.inventoryItemId) {
+      const inventoryItemError = inventoryItemResult.error || "Could not get inventory item ID";
+
       await supabase.from("stock_sync_log").insert({
         product_id: product_id,
         shopify_product_id: product.shopify_product_id,
         shopify_variant_id: product.shopify_variant_id,
         quantity_synced: stockQuantity,
         status: "failed",
-        error_message: "Could not get inventory item ID",
+        error_message: inventoryItemError,
       });
 
       return new Response(
-        JSON.stringify({ error: "Could not get inventory item ID" }),
+        JSON.stringify({ error: inventoryItemError }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -218,11 +289,11 @@ Deno.serve(async (req: Request) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": config.access_token,
+        "X-Shopify-Access-Token": shopifyAccessToken,
       },
       body: JSON.stringify({
         location_id: locationId,
-        inventory_item_id: inventoryItemId,
+        inventory_item_id: inventoryItemResult.inventoryItemId,
         available: Math.floor(stockQuantity),
       }),
     });
@@ -311,19 +382,64 @@ async function getInventoryItemId(
   apiVersion: string,
   accessToken: string,
   variantId: string
-): Promise<string | null> {
+): Promise<{ inventoryItemId: string | null; error?: string }> {
   try {
-    const url = `https://${shopDomain}/admin/api/${apiVersion}/variants/${variantId}.json`;
+    const url = `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
+    const normalizedVariantId = normalizeVariantGid(variantId);
+
     const response = await fetch(url, {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         "X-Shopify-Access-Token": accessToken,
       },
+      body: JSON.stringify({
+        query: `
+          query ProductVariantInventoryItem($id: ID!) {
+            productVariant(id: $id) {
+              inventoryItem {
+                legacyResourceId
+              }
+            }
+          }
+        `,
+        variables: { id: normalizedVariantId },
+      }),
     });
 
     const data = await response.json();
-    return data.variant?.inventory_item_id || null;
+
+    if (!response.ok) {
+      console.error("Shopify productVariant query failed:", data);
+      return {
+        inventoryItemId: null,
+        error: `Shopify productVariant query failed (${response.status}): ${JSON.stringify(data)}`,
+      };
+    }
+
+    if (data.errors?.length) {
+      console.error("Shopify GraphQL errors getting inventory item ID:", data.errors);
+      return {
+        inventoryItemId: null,
+        error: `Shopify GraphQL errors: ${JSON.stringify(data.errors)}`,
+      };
+    }
+
+    const legacyResourceId = data.data?.productVariant?.inventoryItem?.legacyResourceId;
+
+    if (!legacyResourceId) {
+      return {
+        inventoryItemId: null,
+        error: `Shopify variant ${normalizedVariantId} has no inventory item or was not found.`,
+      };
+    }
+
+    return { inventoryItemId: String(legacyResourceId) };
   } catch (error) {
     console.error("Error getting inventory item ID:", error);
-    return null;
+    return {
+      inventoryItemId: null,
+      error: error instanceof Error ? error.message : "Unknown inventory item lookup error",
+    };
   }
 }

@@ -20,10 +20,13 @@ export default function InventoryModule() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showAdjustStockModal, setShowAdjustStockModal] = useState(false);
   const [editingItem, setEditingItem] = useState<RawMaterial | Product | null>(null);
+  const [adjustingProduct, setAdjustingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [rawMaterialForm, setRawMaterialForm] = useState(DEFAULT_RAW_MATERIAL_FORM);
   const [productForm, setProductForm] = useState(DEFAULT_PRODUCT_FORM);
+  const [adjustStockForm, setAdjustStockForm] = useState({ quantity: 0, notes: '' });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -39,7 +42,7 @@ export default function InventoryModule() {
       } else {
         const { data, error } = await supabase
           .from('products')
-          .select('*')
+          .select('*, finished_inventory(id, quantity, min_stock_alert, updated_at)')
           .order('name');
 
         if (error) throw error;
@@ -80,6 +83,38 @@ export default function InventoryModule() {
 
   const filteredProducts = filterProducts(products, searchTerm);
 
+  const getFinishedInventoryRecord = (product: Product) => {
+    if (Array.isArray(product.finished_inventory)) {
+      return product.finished_inventory[0] || null;
+    }
+
+    return product.finished_inventory || null;
+  };
+
+  const getFinishedStock = (product: Product) => getFinishedInventoryRecord(product)?.quantity || 0;
+
+  const ensureVariantIsAvailable = async (variantId: string, currentProductId?: string) => {
+    const normalizedVariantId = variantId.trim();
+
+    if (!normalizedVariantId) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, name, product_id')
+      .eq('shopify_variant_id', normalizedVariantId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data && data.id !== currentProductId) {
+      throw new Error(`La variante Shopify ya está vinculada al producto ERP ${data.name} (${data.product_id}).`);
+    }
+  };
+
   const addRawMaterial = async () => {
     try {
       if (!rawMaterialForm.name) {
@@ -117,6 +152,8 @@ export default function InventoryModule() {
         return;
       }
 
+      await ensureVariantIsAvailable(productForm.shopify_variant_id);
+
       const { error } = await supabase
         .from('products')
         .insert({
@@ -126,6 +163,8 @@ export default function InventoryModule() {
           format: productForm.format,
           color: productForm.color,
           base_price: productForm.base_price,
+          shopify_product_id: productForm.shopify_product_id.trim() || null,
+          shopify_variant_id: productForm.shopify_variant_id.trim() || null,
         });
 
       if (error) throw error;
@@ -150,6 +189,73 @@ export default function InventoryModule() {
     setEditingItem(product);
     setProductForm(mapProductToForm(product));
     setShowEditModal(true);
+  };
+
+  const openAdjustStockModal = (product: Product) => {
+    setAdjustingProduct(product);
+    setAdjustStockForm({
+      quantity: getFinishedStock(product),
+      notes: '',
+    });
+    setShowAdjustStockModal(true);
+  };
+
+  const adjustFinishedStock = async () => {
+    if (!adjustingProduct) return;
+
+    try {
+      const { data: latestFinishedInventory, error: latestFinishedInventoryError } = await supabase
+        .from('finished_inventory')
+        .select('id, quantity')
+        .eq('product_id', adjustingProduct.id)
+        .maybeSingle();
+
+      if (latestFinishedInventoryError) throw latestFinishedInventoryError;
+
+      const currentQuantity = latestFinishedInventory?.quantity || 0;
+      const nextQuantity = Math.max(0, Math.floor(adjustStockForm.quantity));
+      const delta = nextQuantity - currentQuantity;
+      const existingInventoryId = latestFinishedInventory?.id;
+
+      if (existingInventoryId) {
+        const { error: updateError } = await supabase
+          .from('finished_inventory')
+          .update({ quantity: nextQuantity })
+          .eq('id', existingInventoryId);
+
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('finished_inventory')
+          .insert({
+            product_id: adjustingProduct.id,
+            quantity: nextQuantity,
+            min_stock_alert: 0,
+          });
+
+        if (insertError) throw insertError;
+      }
+
+      const { error: transactionError } = await supabase
+        .from('inventory_transactions')
+        .insert({
+          transaction_type: 'adjustment',
+          product_id: adjustingProduct.id,
+          quantity: delta,
+          notes: adjustStockForm.notes.trim() || `Ajuste manual de inventario terminado para ${adjustingProduct.name}`,
+        });
+
+      if (transactionError) throw transactionError;
+
+      setShowAdjustStockModal(false);
+      setAdjustingProduct(null);
+      setAdjustStockForm({ quantity: 0, notes: '' });
+      loadData();
+      alert('Stock terminado ajustado exitosamente');
+    } catch (error) {
+      console.error('Error adjusting finished stock:', error);
+      alert(error instanceof Error ? error.message : 'Error al ajustar stock terminado');
+    }
   };
 
   const { totalRawMaterialValue, inventoryItemCount, lowStockCount } = getInventorySummary(rawMaterials, products, view);
@@ -190,6 +296,8 @@ export default function InventoryModule() {
     if (!editingItem) return;
 
     try {
+      await ensureVariantIsAvailable(productForm.shopify_variant_id, editingItem.id);
+
       const { error } = await supabase
         .from('products')
         .update({
@@ -198,6 +306,8 @@ export default function InventoryModule() {
           format: productForm.format,
           color: productForm.color,
           base_price: productForm.base_price,
+          shopify_product_id: productForm.shopify_product_id.trim() || null,
+          shopify_variant_id: productForm.shopify_variant_id.trim() || null,
         })
         .eq('id', editingItem.id);
 
@@ -435,6 +545,12 @@ export default function InventoryModule() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Precio Base
                   </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Stock Terminado
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Shopify
+                  </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Acciones
                   </th>
@@ -443,7 +559,7 @@ export default function InventoryModule() {
               <tbody className="bg-white divide-y divide-slate-200">
                 {filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan={8} className="px-6 py-8 text-center text-slate-500">
                       {searchTerm ? 'No se encontraron productos con ese criterio de búsqueda' : 'No hay productos registrados'}
                     </td>
                   </tr>
@@ -476,6 +592,34 @@ export default function InventoryModule() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap font-medium text-slate-900">
                       {formatCurrency(product.base_price)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-slate-900">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{getFinishedStock(product)}</span>
+                        {!isOperator && (
+                          <button
+                            onClick={() => openAdjustStockModal(product)}
+                            className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 transition-colors"
+                          >
+                            Ajustar
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      {product.shopify_product_id && product.shopify_variant_id ? (
+                        <div className="space-y-1">
+                          <span className="inline-block px-2 py-1 text-xs font-medium rounded-full bg-emerald-100 text-emerald-700">
+                            Mapeado
+                          </span>
+                          <div className="text-slate-600 break-all">Prod: {product.shopify_product_id}</div>
+                          <div className="text-slate-600 break-all">Var: {product.shopify_variant_id}</div>
+                        </div>
+                      ) : (
+                        <span className="inline-block px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
+                          Sin mapear
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end space-x-2">
@@ -736,6 +880,41 @@ export default function InventoryModule() {
                     </span>
                   </div>
                 </div>
+
+                <div className="space-y-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <div>
+                    <h4 className="text-sm font-semibold text-amber-900">Vinculacion Shopify por variante</h4>
+                    <p className="mt-1 text-sm text-amber-800">
+                      Usa estos campos cuando este SKU del ERP corresponda a una variante especifica en Shopify.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Shopify Product ID
+                    </label>
+                    <input
+                      type="text"
+                      value={productForm.shopify_product_id}
+                      onChange={(e) => setProductForm({ ...productForm, shopify_product_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="gid://shopify/Product/..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Shopify Variant ID
+                    </label>
+                    <input
+                      type="text"
+                      value={productForm.shopify_variant_id}
+                      onChange={(e) => setProductForm({ ...productForm, shopify_variant_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="gid://shopify/ProductVariant/..."
+                    />
+                  </div>
+                </div>
               </div>
             )}
 
@@ -755,6 +934,65 @@ export default function InventoryModule() {
                 className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
               >
                 Agregar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdjustStockModal && adjustingProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Ajustar Stock Terminado</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              {adjustingProduct.name} ({adjustingProduct.product_id})
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Nueva cantidad
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={adjustStockForm.quantity}
+                  onChange={(e) => setAdjustStockForm({ ...adjustStockForm, quantity: parseInt(e.target.value, 10) || 0 })}
+                  className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Nota del ajuste
+                </label>
+                <textarea
+                  value={adjustStockForm.notes}
+                  onChange={(e) => setAdjustStockForm({ ...adjustStockForm, notes: e.target.value })}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  placeholder="Motivo del ajuste manual"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowAdjustStockModal(false);
+                  setAdjustingProduct(null);
+                  setAdjustStockForm({ quantity: 0, notes: '' });
+                }}
+                className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={adjustFinishedStock}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+              >
+                Guardar ajuste
               </button>
             </div>
           </div>
@@ -960,6 +1198,41 @@ export default function InventoryModule() {
                       value={productForm.base_price}
                       onChange={(e) => setProductForm({ ...productForm, base_price: parseFloat(e.target.value) || 0 })}
                       className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <div>
+                    <h4 className="text-sm font-semibold text-amber-900">Vinculacion Shopify por variante</h4>
+                    <p className="mt-1 text-sm text-amber-800">
+                      Este producto ERP se sincroniza con Shopify solo si tiene vinculados el producto y la variante correctos.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Shopify Product ID
+                    </label>
+                    <input
+                      type="text"
+                      value={productForm.shopify_product_id}
+                      onChange={(e) => setProductForm({ ...productForm, shopify_product_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="gid://shopify/Product/..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Shopify Variant ID
+                    </label>
+                    <input
+                      type="text"
+                      value={productForm.shopify_variant_id}
+                      onChange={(e) => setProductForm({ ...productForm, shopify_variant_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-slate-300 bg-white text-slate-900 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                      placeholder="gid://shopify/ProductVariant/..."
                     />
                   </div>
                 </div>
