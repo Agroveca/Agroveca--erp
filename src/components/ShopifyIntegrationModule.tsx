@@ -59,6 +59,21 @@ interface ShopifyWebhookSubscription {
   api_version: string;
 }
 
+interface ShopifySyncPreviewProduct {
+  id: string;
+  name: string;
+  product_id: string;
+  shopify_product_id: string | null;
+  shopify_variant_id: string | null;
+  finished_inventory?: { quantity: number | null | undefined } | Array<{ quantity: number | null | undefined }> | null;
+}
+
+interface ShopifySyncPreviewInventorySnapshot {
+  product_id: string;
+  shopify_quantity: number | null;
+  error: string | null;
+}
+
 interface ShopifyWebhookEvent {
   id: string;
   topic: string | null;
@@ -250,6 +265,11 @@ export default function ShopifyIntegrationModule() {
   const [webhookEvents, setWebhookEvents] = useState<ShopifyWebhookEvent[]>([]);
   const [webhookEventsLoading, setWebhookEventsLoading] = useState(false);
   const [webhookEventsError, setWebhookEventsError] = useState<string | null>(null);
+  const [showSyncPreview, setShowSyncPreview] = useState(false);
+  const [syncPreviewProducts, setSyncPreviewProducts] = useState<ShopifySyncPreviewProduct[]>([]);
+  const [syncPreviewInventory, setSyncPreviewInventory] = useState<Record<string, ShopifySyncPreviewInventorySnapshot>>({});
+  const [syncPreviewLoading, setSyncPreviewLoading] = useState(false);
+  const [syncRunning, setSyncRunning] = useState(false);
 
   useEffect(() => {
     loadConfig();
@@ -468,12 +488,12 @@ export default function ShopifyIntegrationModule() {
   };
 
   const syncAllProducts = async () => {
-    if (!confirm('¿Sincronizar stock de todos los productos con Shopify?')) return;
+    setSyncPreviewLoading(true);
 
     try {
       const { data: products } = await supabase
         .from('products')
-        .select('id, shopify_product_id, shopify_variant_id, finished_inventory(quantity)')
+        .select('id, name, product_id, shopify_product_id, shopify_variant_id, finished_inventory(quantity)')
         .not('shopify_product_id', 'is', null);
 
       if (!products || products.length === 0) {
@@ -488,9 +508,41 @@ export default function ShopifyIntegrationModule() {
         return;
       }
 
+      const { data: previewData, error: previewError } = await supabase.functions.invoke('shopify-stock-preview', {
+        method: 'POST',
+        body: {
+          product_ids: syncPayloads.map((payload) => payload.product_id),
+        },
+      });
+
+      if (previewError) {
+        throw new Error(previewError.message);
+      }
+
+      const inventoryMap = Object.fromEntries(
+        ((previewData?.items || []) as ShopifySyncPreviewInventorySnapshot[]).map((item) => [item.product_id, item]),
+      );
+
+      setSyncPreviewProducts(products as ShopifySyncPreviewProduct[]);
+      setSyncPreviewInventory(inventoryMap);
+      setShowSyncPreview(true);
+    } catch (error) {
+      console.error('Error preparing product sync:', error);
+      alert('Error al preparar la previsualización de sincronización');
+    } finally {
+      setSyncPreviewLoading(false);
+    }
+  };
+
+  const confirmSyncAllProducts = async () => {
+    setSyncRunning(true);
+
+    try {
+      const syncPayloads = getShopifyStockSyncPayloads(syncPreviewProducts);
+
       let successCount = 0;
       let errorCount = 0;
-      const skippedCount = products.length - syncPayloads.length;
+      const skippedCount = syncPreviewProducts.length - syncPayloads.length;
 
       for (const payload of syncPayloads) {
         try {
@@ -509,11 +561,14 @@ export default function ShopifyIntegrationModule() {
       }
 
       alert(`Sincronización completada:\n✓ Exitosos: ${successCount}\n✗ Errores: ${errorCount}\n- Omitidos: ${skippedCount}`);
+      setShowSyncPreview(false);
       loadSyncLogs();
       loadConfig();
     } catch (error) {
       console.error('Error syncing products:', error);
       alert('Error al sincronizar productos');
+    } finally {
+      setSyncRunning(false);
     }
   };
 
@@ -540,6 +595,9 @@ export default function ShopifyIntegrationModule() {
 
     return 'bg-gray-100 text-gray-700';
   };
+
+  const syncPreviewPayloads = getShopifyStockSyncPayloads(syncPreviewProducts);
+  const syncPreviewSkippedCount = syncPreviewProducts.length - syncPreviewPayloads.length;
 
   if (!isAdmin) {
     return (
@@ -807,11 +865,11 @@ export default function ShopifyIntegrationModule() {
           <h3 className="text-lg font-semibold text-gray-900">Sincronización de Stock</h3>
           <button
             onClick={syncAllProducts}
-            disabled={!config || !config.is_active}
+            disabled={!config || !config.is_active || syncPreviewLoading}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw className="w-4 h-4" />
-            Sincronizar Todo
+            {syncPreviewLoading ? 'Preparando...' : 'Sincronizar Todo'}
           </button>
         </div>
 
@@ -890,116 +948,212 @@ export default function ShopifyIntegrationModule() {
         </div>
       </div>
 
-       {/* --- SALUD SHOPIFY: Productos/variantes no mapeados --- */}
-       <div className="bg-white rounded-lg shadow-sm border border-yellow-200 p-6">
-         <div className="flex items-center gap-2 mb-2">
-           <AlertCircle className="w-5 h-5 text-yellow-500" />
-           <h3 className="font-semibold text-yellow-900 text-lg">Salud Integración Shopify: Productos/variantes sin mapear</h3>
-         </div>
-         {discoveryLoading ? (
-           <div className="text-yellow-600 py-8">Cargando productos desde Shopify...</div>
-         ) : discoveryError ? (
-           <div className="text-red-600 py-8">Error: {discoveryError}</div>
-         ) : shopifyDiscovery && shopifyDiscovery.unmapped ? (
-           <>
-             <div className="mb-4 text-yellow-900">
-               Encontrados <b>{shopifyDiscovery.unmapped.length}</b> productos/variantes de Shopify sin vincular.<br />
-               {shopifyDiscovery.unmapped.length === 0 && (
-                 <span className="text-green-800">¡Todo mapeado correctamente!</span>
-               )}
-             </div>
-             <div className="overflow-x-auto">
-               <table className="w-full border border-gray-300 rounded-lg text-sm" style={{borderCollapse:'collapse'}}>
-                 <thead className="bg-gray-100">
+      {/* --- SALUD SHOPIFY: Productos/variantes no mapeados --- */}
+      <div className="bg-white rounded-lg shadow-sm border border-yellow-200 p-6">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertCircle className="w-5 h-5 text-yellow-500" />
+          <h3 className="font-semibold text-yellow-900 text-lg">Salud Integración Shopify: Productos/variantes sin mapear</h3>
+        </div>
+        {discoveryLoading ? (
+          <div className="text-yellow-600 py-8">Cargando productos desde Shopify...</div>
+        ) : discoveryError ? (
+          <div className="text-red-600 py-8">Error: {discoveryError}</div>
+        ) : shopifyDiscovery && shopifyDiscovery.unmapped ? (
+          <>
+            <div className="mb-4 text-yellow-900">
+              Encontrados <b>{shopifyDiscovery.unmapped.length}</b> productos/variantes de Shopify sin vincular.<br />
+              {shopifyDiscovery.unmapped.length === 0 && (
+                <span className="text-green-800">¡Todo mapeado correctamente!</span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border border-gray-300 rounded-lg text-sm" style={{ borderCollapse: 'collapse' }}>
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Producto Shopify</th>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Shopify Product ID</th>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Variante</th>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Shopify Variant ID</th>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">SKU</th>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Sugerencia del ERP</th>
+                    <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Accion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shopifyDiscovery.unmapped.length === 0 && (
                     <tr>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Producto Shopify</th>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Shopify Product ID</th>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Variante</th>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Shopify Variant ID</th>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">SKU</th>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Sugerencia del ERP</th>
-                      <th className="border border-gray-300 px-4 py-2 text-gray-800 font-bold">Accion</th>
+                      <td colSpan={7} className="py-8 text-center text-gray-500">No hay productos sin mapear actualmente.</td>
+                    </tr>
+                  )}
+                  {shopifyDiscovery.unmapped.map((item: import('../types/shopify').UnmappedShopifyProduct, idx: number) => (
+                    <tr key={item.variant.id + '-' + idx} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                      <td className="border border-gray-200 px-4 py-2 text-gray-900">{item.shopifyProduct.title}</td>
+                      <td className="border border-gray-200 px-4 py-2 text-xs text-gray-700">
+                        <div className="space-y-2">
+                          <div className="break-all">{item.shopifyProduct.id}</div>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(item.shopifyProduct.id, `product-${item.shopifyProduct.id}`)}
+                            className="inline-flex items-center rounded-md bg-slate-200 px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300"
+                          >
+                            {copiedField === `product-${item.shopifyProduct.id}` ? 'Copiado' : 'Copiar'}
+                          </button>
+                        </div>
+                      </td>
+                      <td className="border border-gray-200 px-4 py-2 text-gray-900">{(() => {
+                        const variant = item.shopifyProduct.variants.find(v => v.id === item.variant.id);
+                        return variant?.title || '-';
+                      })()}</td>
+                      <td className="border border-gray-200 px-4 py-2 text-xs text-gray-700">
+                        <div className="space-y-2">
+                          <div className="break-all">{item.variant.id}</div>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(item.variant.id, `variant-${item.variant.id}`)}
+                            className="inline-flex items-center rounded-md bg-slate-200 px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300"
+                          >
+                            {copiedField === `variant-${item.variant.id}` ? 'Copiado' : 'Copiar'}
+                          </button>
+                        </div>
+                      </td>
+                      <td className="border border-gray-200 px-4 py-2 text-gray-900">{item.variant.sku}</td>
+                      <td className="border border-gray-200 px-4 py-2 text-gray-900">
+                        {item.suggestedMatch ? (
+                          <span className="inline-block bg-blue-50 text-blue-800 text-xs font-medium px-2 py-1 rounded-lg">
+                            {item.suggestedMatch.name || item.suggestedMatch.product_id}
+                          </span>
+                        ) : (
+                          <span className="inline-block text-xs text-gray-400">Sin sugerencia</span>
+                        )}
+                      </td>
+                      <td className="border border-gray-200 px-4 py-2 text-gray-900">
+                        {item.suggestedMatch ? (
+                          <button
+                            type="button"
+                            onClick={() => linkSuggestedProduct(item)}
+                            disabled={linkingVariantId === item.variant.id}
+                            className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                          >
+                            {linkingVariantId === item.variant.id ? 'Vinculando...' : 'Vincular'}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">Manual</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 text-sm text-yellow-900">
+              Si existe sugerencia, puedes vincular directamente desde aquí. Si no, ve al módulo <strong>Invetario</strong> y completa los IDs manualmente.<br />
+              La vinculación siempre se hace por SKU ERP hacia una variante específica de Shopify.
+              <br />
+            </div>
+          </>
+        ) : (
+          <div className="text-gray-500 py-8">No se pudo cargar el estado de salud de integración Shopify.</div>
+        )}
+      </div>
+
+      {showSyncPreview && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 py-6 sm:items-center">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h3 className="text-xl font-bold text-gray-900">Previsualización de sincronización Shopify</h3>
+              <p className="mt-1 text-sm text-gray-600">
+                Revisa qué productos y cantidades se enviarán a Shopify antes de ejecutar la sincronización completa.
+              </p>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto px-6 py-4">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                Se sincronizarán <strong>{syncPreviewPayloads.length}</strong> productos.
+                {syncPreviewSkippedCount > 0 && (
+                  <span> Hay <strong>{syncPreviewSkippedCount}</strong> omitidos por datos incompletos.</span>
+                )}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto ERP</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Variant ID Shopify</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cantidad ERP</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Shopify actual</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Diferencia</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {shopifyDiscovery.unmapped.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="py-8 text-center text-gray-500">No hay productos sin mapear actualmente.</td>
-                      </tr>
-                    )}
-                    {shopifyDiscovery.unmapped.map((item: import('../types/shopify').UnmappedShopifyProduct, idx: number) => (
-                      <tr key={item.variant.id + '-' + idx} className={idx%2===0 ? 'bg-gray-50' : 'bg-white'}>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{item.shopifyProduct.title}</td>
-                        <td className="border border-gray-200 px-4 py-2 text-xs text-gray-700">
-                          <div className="space-y-2">
-                            <div className="break-all">{item.shopifyProduct.id}</div>
-                            <button
-                              type="button"
-                              onClick={() => copyToClipboard(item.shopifyProduct.id, `product-${item.shopifyProduct.id}`)}
-                              className="inline-flex items-center rounded-md bg-slate-200 px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300"
-                            >
-                              {copiedField === `product-${item.shopifyProduct.id}` ? 'Copiado' : 'Copiar'}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{(() => {
-                          const variant = item.shopifyProduct.variants.find(v => v.id === item.variant.id);
-                          return variant?.title || '-';
-                        })()}</td>
-                        <td className="border border-gray-200 px-4 py-2 text-xs text-gray-700">
-                          <div className="space-y-2">
-                            <div className="break-all">{item.variant.id}</div>
-                            <button
-                              type="button"
-                              onClick={() => copyToClipboard(item.variant.id, `variant-${item.variant.id}`)}
-                              className="inline-flex items-center rounded-md bg-slate-200 px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300"
-                            >
-                              {copiedField === `variant-${item.variant.id}` ? 'Copiado' : 'Copiar'}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{item.variant.sku}</td>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">
-                          {item.suggestedMatch ? (
-                            <span className="inline-block bg-blue-50 text-blue-800 text-xs font-medium px-2 py-1 rounded-lg">
-                              {item.suggestedMatch.name || item.suggestedMatch.product_id}
-                            </span>
-                          ) : (
-                            <span className="inline-block text-xs text-gray-400">Sin sugerencia</span>
-                          )}
-                        </td>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">
-                          {item.suggestedMatch ? (
-                            <button
-                              type="button"
-                              onClick={() => linkSuggestedProduct(item)}
-                              disabled={linkingVariantId === item.variant.id}
-                              className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
-                            >
-                              {linkingVariantId === item.variant.id ? 'Vinculando...' : 'Vincular'}
-                            </button>
-                          ) : (
-                            <span className="text-xs text-gray-400">Manual</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody className="divide-y divide-gray-200">
+                    {syncPreviewProducts.map((product) => {
+                      const payload = syncPreviewPayloads.find((item) => item.product_id === product.id);
+                      const inventorySnapshot = syncPreviewInventory[product.id];
+                      const quantity = Array.isArray(product.finished_inventory)
+                        ? product.finished_inventory[0]?.quantity
+                        : product.finished_inventory?.quantity;
+                      const erpQuantity = typeof quantity === 'number' && Number.isFinite(quantity) ? quantity : null;
+                      const delta = payload && erpQuantity !== null && inventorySnapshot?.shopify_quantity !== null && inventorySnapshot?.shopify_quantity !== undefined
+                        ? erpQuantity - inventorySnapshot.shopify_quantity
+                        : null;
+
+                      return (
+                        <tr key={product.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            <div className="font-medium">{product.name}</div>
+                            <div className="text-xs text-gray-500">{product.product_id}</div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 break-all">{product.shopify_variant_id || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">{erpQuantity ?? 'Se resolverá en servidor'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">{inventorySnapshot?.error ? 'No disponible' : inventorySnapshot?.shopify_quantity ?? 'No disponible'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {inventorySnapshot?.error
+                              ? inventorySnapshot.error
+                              : delta === null
+                                ? 'Sin calculo'
+                                : delta > 0
+                                  ? `+${delta}`
+                                  : `${delta}`}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {payload ? (
+                              <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700">
+                                Se sincroniza
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800">
+                                Omitido por datos incompletos
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-              <div className="mt-4 text-sm text-yellow-900">
-                Si existe sugerencia, puedes vincular directamente desde aquí. Si no, ve al módulo <strong>Productos</strong> y completa los IDs manualmente.<br />
-                La vinculacion siempre se hace por SKU ERP hacia una variante especifica de Shopify.
-                <br />
-                <a href="/productos" className="inline-block mt-3 bg-yellow-300 text-yellow-900 font-bold no-underline px-4 py-2 rounded-md hover:bg-yellow-400 transition-colors">
-                  Ir al módulo Productos
-               </a>
-             </div>
-           </>
-         ) : (
-           <div className="text-gray-500 py-8">No se pudo cargar el estado de salud de integración Shopify.</div>
-         )}
-       </div>
+            </div>
+
+            <div className="mt-auto flex gap-3 border-t border-gray-200 px-6 py-4">
+              <button
+                onClick={() => setShowSyncPreview(false)}
+                disabled={syncRunning}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmSyncAllProducts}
+                disabled={syncRunning}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {syncRunning ? 'Sincronizando...' : 'Confirmar sincronización'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showConfig && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 py-6 sm:items-center">

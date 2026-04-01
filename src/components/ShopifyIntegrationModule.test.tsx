@@ -99,6 +99,21 @@ describe('ShopifyIntegrationModule – Panel de Salud Shopify', () => {
     mockAlert.mockReset();
     clipboardWriteText.mockResolvedValue(undefined);
     mockInvoke.mockImplementation((functionName?: string) => {
+      if (functionName === 'shopify-stock-preview') {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                product_id: 'prod-1',
+                shopify_quantity: 5,
+                error: null,
+              },
+            ],
+          },
+          error: null,
+        });
+      }
+
       if (functionName === 'shopify-locations') {
         return Promise.resolve({ data: { locations: [] }, error: null });
       }
@@ -293,6 +308,207 @@ describe('ShopifyIntegrationModule – Panel de Salud Shopify', () => {
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('gid://shopify/Location/123456789')).toBeInTheDocument();
+    });
+  });
+
+  it('muestra una previsualizacion antes de sincronizar todo el stock', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'shopify_config') {
+        return {
+          select: vi.fn().mockReturnValue({ maybeSingle: mockMaybeSingle }),
+          update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      if (table === 'products') {
+        return {
+          select: vi.fn().mockReturnValue({
+            not: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: 'prod-1',
+                  name: 'Fertilizante A',
+                  product_id: 'FER-A',
+                  shopify_product_id: 'gid://shopify/Product/1',
+                  shopify_variant_id: 'gid://shopify/ProductVariant/11',
+                  finished_inventory: { quantity: 8 },
+                },
+              ],
+              error: null,
+            }),
+          }),
+          update: mockProductsUpdate,
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      if (table === 'shopify_webhook_events') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          }),
+          update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      return {
+        select: vi.fn().mockReturnValue(createQueryBuilder({ data: [], error: null })),
+        update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+        insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+      };
+    });
+
+    mockMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'cfg-1',
+        shop_domain: 'agroveca.myshopify.com',
+        shopify_location_id: '',
+        api_version: '2026-01',
+        webhook_secret: 'hook',
+        commission_percentage: 2,
+        payment_gateway_fee: 2.5,
+        is_active: true,
+        last_sync_at: null,
+        created_at: '2026-03-31T00:00:00.000Z',
+      },
+      error: null,
+    });
+
+    render(<ShopifyIntegrationModule />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sincronizar Todo' }));
+
+    expect(await screen.findByText(/Previsualización de sincronización Shopify/i)).toBeInTheDocument();
+    expect(screen.getByText('Fertilizante A')).toBeInTheDocument();
+    expect(screen.getByText('gid://shopify/ProductVariant/11')).toBeInTheDocument();
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('+3')).toBeInTheDocument();
+    expect(screen.getByText('Se sincroniza')).toBeInTheDocument();
+  });
+
+  it('ejecuta la sincronizacion solo despues de confirmar la previsualizacion', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'shopify_config') {
+        return {
+          select: vi.fn().mockReturnValue({ maybeSingle: mockMaybeSingle }),
+          update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      if (table === 'products') {
+        return {
+          select: vi.fn().mockReturnValue({
+            not: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: 'prod-1',
+                  name: 'Fertilizante A',
+                  product_id: 'FER-A',
+                  shopify_product_id: 'gid://shopify/Product/1',
+                  shopify_variant_id: 'gid://shopify/ProductVariant/11',
+                  finished_inventory: { quantity: 8 },
+                },
+              ],
+              error: null,
+            }),
+          }),
+          update: mockProductsUpdate,
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      if (table === 'shopify_webhook_events') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          }),
+          update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      if (table === 'stock_sync_log' || table === 'shopify_orders') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          }),
+          update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+          insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }
+
+      return {
+        select: vi.fn().mockReturnValue(createQueryBuilder({ data: [], error: null })),
+        update: vi.fn().mockReturnValue(createQueryBuilder({ data: null, error: null })),
+        insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+      };
+    });
+
+    mockMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'cfg-1',
+        shop_domain: 'agroveca.myshopify.com',
+        shopify_location_id: '',
+        api_version: '2026-01',
+        webhook_secret: 'hook',
+        commission_percentage: 2,
+        payment_gateway_fee: 2.5,
+        is_active: true,
+        last_sync_at: null,
+        created_at: '2026-03-31T00:00:00.000Z',
+      },
+      error: null,
+    });
+
+    mockInvoke.mockImplementation((functionName?: string) => {
+      if (functionName === 'shopify-stock-preview') {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                product_id: 'prod-1',
+                shopify_quantity: 5,
+                error: null,
+              },
+            ],
+          },
+          error: null,
+        });
+      }
+
+      if (functionName === 'shopify-sync-stock') {
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+
+      if (functionName === 'shopify-webhook-status') {
+        return Promise.resolve({ data: { webhooks: [] }, error: null });
+      }
+
+      return Promise.resolve({ data: { unmapped: [] }, error: null });
+    });
+
+    render(<ShopifyIntegrationModule />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sincronizar Todo' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirmar sincronización' }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('shopify-sync-stock', {
+        body: {
+          product_id: 'prod-1',
+          quantity: 8,
+        },
+      });
     });
   });
 
