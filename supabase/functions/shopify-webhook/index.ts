@@ -46,6 +46,10 @@ interface ActiveShopifyConfig {
   payment_gateway_fee: number | null;
 }
 
+interface WebhookAuditEvent {
+  id: string;
+}
+
 function normalizeShopDomain(value: string): string {
   return value.replace(/^https?:\/\//i, "").replace(/\/$/, "").trim().toLowerCase();
 }
@@ -107,10 +111,66 @@ function scheduleBackgroundTask(task: Promise<unknown>): boolean {
   return true;
 }
 
+async function createWebhookAuditEvent(
+  supabase: ReturnType<typeof createClient>,
+  topic: string | null,
+  shopDomain: string | null,
+  webhookId: string | null,
+  payload: string,
+): Promise<string | null> {
+  const payloadJson = safeParseJson(payload);
+  const { data, error } = await supabase
+    .from("shopify_webhook_events")
+    .insert({
+      topic,
+      shop_domain: shopDomain,
+      shopify_webhook_id: webhookId,
+      status: "received",
+      payload: payloadJson,
+    })
+    .select("id")
+    .single<WebhookAuditEvent>();
+
+  if (error) {
+    console.error("Failed to create webhook audit event:", error);
+    return null;
+  }
+
+  return data?.id ?? null;
+}
+
+async function updateWebhookAuditEvent(
+  supabase: ReturnType<typeof createClient>,
+  eventId: string | null,
+  updates: Record<string, unknown>,
+) {
+  if (!eventId) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from("shopify_webhook_events")
+    .update(updates)
+    .eq("id", eventId);
+
+  if (error) {
+    console.error("Failed to update webhook audit event:", error);
+  }
+}
+
+function safeParseJson(payload: string): unknown {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return { raw_payload: payload };
+  }
+}
+
 async function processOrdersCreateWebhook(
   supabase: ReturnType<typeof createClient>,
   orderData: ShopifyOrder,
   activeConfig: ActiveShopifyConfig,
+  webhookEventId: string | null,
 ) {
   let customerId = null;
 
@@ -188,6 +248,12 @@ async function processOrdersCreateWebhook(
     });
 
   if (orderError) {
+    await updateWebhookAuditEvent(supabase, webhookEventId, {
+      status: "failed",
+      http_status: 500,
+      error_message: orderError.message,
+      processed_at: new Date().toISOString(),
+    });
     throw new Error(`Failed to save order: ${orderError.message}`);
   }
 
@@ -204,6 +270,13 @@ async function processOrdersCreateWebhook(
       });
     }
   }
+
+  await updateWebhookAuditEvent(supabase, webhookEventId, {
+    status: "processed",
+    http_status: 200,
+    error_message: null,
+    processed_at: new Date().toISOString(),
+  });
 
   return {
     order_id: orderData.id,
@@ -240,6 +313,9 @@ Deno.serve(async (req: Request) => {
     const topic = req.headers.get("X-Shopify-Topic");
     const shopDomain = req.headers.get("X-Shopify-Shop-Domain");
     const hmac = req.headers.get("X-Shopify-Hmac-Sha256");
+    const webhookId = req.headers.get("X-Shopify-Webhook-Id");
+
+    let webhookEventId: string | null = null;
 
     if (!topic || !shopDomain || !hmac) {
       return new Response(
@@ -252,6 +328,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const rawBody = await req.text();
+    webhookEventId = await createWebhookAuditEvent(supabase, topic, shopDomain, webhookId, rawBody);
 
     const { data: config } = await supabase
       .from("shopify_config")
@@ -260,6 +337,12 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (!config) {
+      await updateWebhookAuditEvent(supabase, webhookEventId, {
+        status: "rejected",
+        http_status: 400,
+        error_message: "Shopify not configured",
+        processed_at: new Date().toISOString(),
+      });
       return new Response(
         JSON.stringify({ error: "Shopify not configured" }),
         {
@@ -277,6 +360,12 @@ Deno.serve(async (req: Request) => {
       normalizedIncomingShopDomain !== normalizedConfigDomain ||
       normalizedIncomingShopDomain !== normalizedSecretDomain
     ) {
+      await updateWebhookAuditEvent(supabase, webhookEventId, {
+        status: "rejected",
+        http_status: 401,
+        error_message: "Shop domain mismatch",
+        processed_at: new Date().toISOString(),
+      });
       return new Response(
         JSON.stringify({ error: "Shop domain mismatch" }),
         {
@@ -289,6 +378,12 @@ Deno.serve(async (req: Request) => {
     const isValidWebhook = await verifyShopifyWebhook(rawBody, hmac, shopifyClientSecret);
 
     if (!isValidWebhook) {
+      await updateWebhookAuditEvent(supabase, webhookEventId, {
+        status: "rejected",
+        http_status: 401,
+        error_message: "Invalid webhook signature",
+        processed_at: new Date().toISOString(),
+      });
       return new Response(
         JSON.stringify({ error: "Invalid webhook signature" }),
         {
@@ -301,9 +396,22 @@ Deno.serve(async (req: Request) => {
     const orderData: ShopifyOrder = JSON.parse(rawBody);
 
     if (topic === "orders/create") {
-      const processingTask = processOrdersCreateWebhook(supabase, orderData, config);
+      await updateWebhookAuditEvent(supabase, webhookEventId, {
+        status: "accepted",
+        http_status: 200,
+      });
+
+      const processingTask = processOrdersCreateWebhook(supabase, orderData, config, webhookEventId);
 
       if (scheduleBackgroundTask(processingTask.catch((error) => {
+        updateWebhookAuditEvent(supabase, webhookEventId, {
+          status: "failed",
+          http_status: 500,
+          error_message: error instanceof Error ? error.message : "Unknown background error",
+          processed_at: new Date().toISOString(),
+        }).catch((auditError) => {
+          console.error("Failed to persist webhook background error:", auditError);
+        });
         console.error("Error processing orders/create webhook:", error);
       }))) {
         return new Response(
@@ -337,6 +445,12 @@ Deno.serve(async (req: Request) => {
         }
       );
     }
+
+    await updateWebhookAuditEvent(supabase, webhookEventId, {
+      status: "processed",
+      http_status: 200,
+      processed_at: new Date().toISOString(),
+    });
 
     return new Response(
       JSON.stringify({ success: true, message: "Webhook received" }),
