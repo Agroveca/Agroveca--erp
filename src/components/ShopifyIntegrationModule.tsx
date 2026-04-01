@@ -74,6 +74,17 @@ interface ShopifySyncPreviewInventorySnapshot {
   error: string | null;
 }
 
+interface ShopifyStockMismatchRow {
+  product_id: string;
+  name: string;
+  product_code: string;
+  shopify_variant_id: string | null;
+  erp_quantity: number | null;
+  shopify_quantity: number | null;
+  delta: number | null;
+  error: string | null;
+}
+
 interface ShopifyWebhookEvent {
   id: string;
   topic: string | null;
@@ -270,6 +281,11 @@ export default function ShopifyIntegrationModule() {
   const [syncPreviewInventory, setSyncPreviewInventory] = useState<Record<string, ShopifySyncPreviewInventorySnapshot>>({});
   const [syncPreviewLoading, setSyncPreviewLoading] = useState(false);
   const [syncRunning, setSyncRunning] = useState(false);
+  const [stockMismatches, setStockMismatches] = useState<ShopifyStockMismatchRow[]>([]);
+  const [stockMismatchLoading, setStockMismatchLoading] = useState(false);
+  const [stockMismatchError, setStockMismatchError] = useState<string | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false);
 
   useEffect(() => {
     loadConfig();
@@ -338,6 +354,82 @@ export default function ShopifyIntegrationModule() {
 
   useEffect(() => {
     loadWebhookEvents();
+  }, [session]);
+
+  const loadStockMismatches = async () => {
+    if (!session) {
+      setStockMismatches([]);
+      return;
+    }
+
+    setStockMismatchLoading(true);
+    setStockMismatchError(null);
+
+    try {
+      const { data: products, error: productsError } = await supabase
+        .from('products')
+        .select('id, name, product_id, shopify_product_id, shopify_variant_id, finished_inventory(quantity)')
+        .not('shopify_product_id', 'is', null);
+
+      if (productsError) {
+        throw productsError;
+      }
+
+      const typedProducts = (products || []) as ShopifySyncPreviewProduct[];
+      const syncPayloads = getShopifyStockSyncPayloads(typedProducts);
+
+      if (syncPayloads.length === 0) {
+        setStockMismatches([]);
+        return;
+      }
+
+      const { data: previewData, error: previewError } = await supabase.functions.invoke('shopify-stock-preview', {
+        method: 'POST',
+        body: {
+          product_ids: syncPayloads.map((payload) => payload.product_id),
+        },
+      });
+
+      if (previewError) {
+        throw new Error(previewError.message);
+      }
+
+      const inventoryMap = Object.fromEntries(
+        ((previewData?.items || []) as ShopifySyncPreviewInventorySnapshot[]).map((item) => [item.product_id, item]),
+      );
+
+      const mismatches = typedProducts.map((product) => {
+        const quantity = Array.isArray(product.finished_inventory)
+          ? product.finished_inventory[0]?.quantity
+          : product.finished_inventory?.quantity;
+        const erpQuantity = typeof quantity === 'number' && Number.isFinite(quantity) ? quantity : null;
+        const snapshot = inventoryMap[product.id];
+        const shopifyQuantity = snapshot?.shopify_quantity ?? null;
+        const delta = erpQuantity !== null && shopifyQuantity !== null ? erpQuantity - shopifyQuantity : null;
+
+        return {
+          product_id: product.id,
+          name: product.name,
+          product_code: product.product_id,
+          shopify_variant_id: product.shopify_variant_id,
+          erp_quantity: erpQuantity,
+          shopify_quantity: shopifyQuantity,
+          delta,
+          error: snapshot?.error || null,
+        } satisfies ShopifyStockMismatchRow;
+      }).filter((item) => item.error || item.delta !== null && item.delta !== 0);
+
+      setStockMismatches(mismatches);
+    } catch (error) {
+      setStockMismatchError(error instanceof Error ? error.message : 'Error desconocido');
+      setStockMismatches([]);
+    } finally {
+      setStockMismatchLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStockMismatches();
   }, [session]);
 
   useEffect(() => {
@@ -412,6 +504,8 @@ export default function ShopifyIntegrationModule() {
   };
 
   const saveConfig = async () => {
+    setSavingConfig(true);
+
     try {
       if (config) {
         const { error } = await supabase
@@ -434,6 +528,8 @@ export default function ShopifyIntegrationModule() {
     } catch (error) {
       console.error('Error saving config:', error);
       alert('Error al guardar configuración');
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -474,6 +570,8 @@ export default function ShopifyIntegrationModule() {
   const toggleActive = async () => {
     if (!config) return;
 
+    setTogglingActive(true);
+
     try {
       const { error } = await supabase
         .from('shopify_config')
@@ -484,6 +582,8 @@ export default function ShopifyIntegrationModule() {
       loadConfig();
     } catch (error) {
       console.error('Error toggling active:', error);
+    } finally {
+      setTogglingActive(false);
     }
   };
 
@@ -564,6 +664,7 @@ export default function ShopifyIntegrationModule() {
       setShowSyncPreview(false);
       loadSyncLogs();
       loadConfig();
+      loadStockMismatches();
     } catch (error) {
       console.error('Error syncing products:', error);
       alert('Error al sincronizar productos');
@@ -647,12 +748,13 @@ export default function ShopifyIntegrationModule() {
           {config && (
             <button
               onClick={toggleActive}
+              disabled={togglingActive}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${config.is_active
                 ? 'bg-green-100 text-green-700 hover:bg-green-200'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                } disabled:cursor-not-allowed disabled:opacity-60`}
             >
-              {config.is_active ? 'Activo' : 'Inactivo'}
+              {togglingActive ? 'Actualizando...' : config.is_active ? 'Activo' : 'Inactivo'}
             </button>
           )}
           <button
@@ -858,6 +960,74 @@ export default function ShopifyIntegrationModule() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Productos con stock desincronizado</h3>
+            <p className="text-sm text-gray-600">Compara rápidamente el stock del ERP contra el stock actual en Shopify.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {stockMismatchLoading && <span className="text-sm text-gray-500">Comparando...</span>}
+            <button
+              type="button"
+              onClick={loadStockMismatches}
+              disabled={stockMismatchLoading || !session}
+              className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {stockMismatchLoading ? 'Actualizando...' : 'Refrescar comparación'}
+            </button>
+          </div>
+        </div>
+
+        {stockMismatchError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+            No se pudo comparar el stock con Shopify: {stockMismatchError}
+          </div>
+        ) : stockMismatches.length === 0 ? (
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+            No se detectan diferencias de stock entre ERP y Shopify en los productos comparados.
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-900">
+              Se detectaron <strong>{stockMismatches.length}</strong> productos con diferencias o con observaciones de stock.
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto ERP</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Variant ID Shopify</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ERP</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Shopify</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Diferencia</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Observación</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {stockMismatches.map((item) => (
+                    <tr key={item.product_id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs text-gray-500">{item.product_code}</div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 break-all">{item.shopify_variant_id || '-'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{item.erp_quantity ?? '-'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{item.shopify_quantity ?? '-'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {item.delta === null ? '-' : item.delta > 0 ? `+${item.delta}` : `${item.delta}`}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{item.error || 'Desincronizado'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -1310,9 +1480,10 @@ export default function ShopifyIntegrationModule() {
               </button>
               <button
                 onClick={saveConfig}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                disabled={savingConfig}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Guardar
+                {savingConfig ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
           </div>
